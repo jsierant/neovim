@@ -31,6 +31,11 @@ describe(':checkhealth', function()
     eq("ERROR: $VIM is invalid: zub",
        string.match(curbuf_contents(), "ERROR: $VIM .* zub"))
   end)
+  it('completions can be listed via getcompletion()', function()
+    clear()
+    eq('nvim', getcompletion('nvim', 'checkhealth')[1])
+    eq('provider', getcompletion('prov', 'checkhealth')[1])
+  end)
 end)
 
 describe('health.vim', function()
