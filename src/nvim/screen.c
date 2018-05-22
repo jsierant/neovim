@@ -1607,7 +1607,7 @@ static void win_update(win_T *wp)
 int win_signcol_width(win_T *wp)
 {
   // 2 is vim default value
-  return 2;
+  return 1;
 }
 
 /*
