@@ -3105,12 +3105,12 @@ void ex_make(exarg_T *eap)
   }
 
   switch (eap->cmdidx) {
-  case CMD_make:      au_name = (char_u *)"make"; break;
-  case CMD_lmake:     au_name = (char_u *)"lmake"; break;
-  case CMD_grep:      au_name = (char_u *)"grep"; break;
-  case CMD_lgrep:     au_name = (char_u *)"lgrep"; break;
-  case CMD_grepadd:   au_name = (char_u *)"grepadd"; break;
-  case CMD_lgrepadd:  au_name = (char_u *)"lgrepadd"; break;
+  case CMD_make:      au_name = (char_u *)"DISABLED_make"; break;
+  case CMD_lmake:     au_name = (char_u *)"DISABLED_lmake"; break;
+  case CMD_grep:      au_name = (char_u *)"DISABLED_grep"; break;
+  case CMD_lgrep:     au_name = (char_u *)"DISABLED_lgrep"; break;
+  case CMD_grepadd:   au_name = (char_u *)"DISABLED_grepadd"; break;
+  case CMD_lgrepadd:  au_name = (char_u *)"DISABLED_lgrepadd"; break;
   default: break;
   }
   if (au_name != NULL && apply_autocmds(EVENT_QUICKFIXCMDPRE, au_name,
