@@ -163,6 +163,7 @@ static const struct key_name_entry {
   { K_DEL,             "Del" },
   { K_DEL,             "Delete" },      // Alternative name
   { K_KDEL,            "kDel" },
+  { K_KDEL,            "KPPeriod" },    // libtermkey name
   { K_UP,              "Up" },
   { K_DOWN,            "Down" },
   { K_LEFT,            "Left" },
@@ -171,6 +172,14 @@ static const struct key_name_entry {
   { K_XDOWN,           "xDown" },
   { K_XLEFT,           "xLeft" },
   { K_XRIGHT,          "xRight" },
+  { K_KUP,             "kUp" },
+  { K_KUP,             "KP8" },
+  { K_KDOWN,           "kDown" },
+  { K_KDOWN,           "KP2" },
+  { K_KLEFT,           "kLeft" },
+  { K_KLEFT,           "KP4" },
+  { K_KRIGHT,          "kRight" },
+  { K_KRIGHT,          "KP6" },
 
   { K_F1,              "F1" },
   { K_F2,              "F2" },
@@ -223,25 +232,41 @@ static const struct key_name_entry {
   { K_INS,             "Insert" },
   { K_INS,             "Ins" },         // Alternative name
   { K_KINS,            "kInsert" },
+  { K_KINS,            "KP0" },
   { K_HOME,            "Home" },
   { K_KHOME,           "kHome" },
+  { K_KHOME,           "KP7" },
   { K_XHOME,           "xHome" },
   { K_ZHOME,           "zHome" },
   { K_END,             "End" },
   { K_KEND,            "kEnd" },
+  { K_KEND,            "KP1" },
   { K_XEND,            "xEnd" },
   { K_ZEND,            "zEnd" },
   { K_PAGEUP,          "PageUp" },
   { K_PAGEDOWN,        "PageDown" },
   { K_KPAGEUP,         "kPageUp" },
+  { K_KPAGEUP,         "KP9" },
   { K_KPAGEDOWN,       "kPageDown" },
+  { K_KPAGEDOWN,       "KP3" },
+  { K_KORIGIN,         "kOrigin" },
+  { K_KORIGIN,         "KP5" },
 
   { K_KPLUS,           "kPlus" },
+  { K_KPLUS,           "KPPlus" },
   { K_KMINUS,          "kMinus" },
+  { K_KMINUS,          "KPMinus" },
   { K_KDIVIDE,         "kDivide" },
+  { K_KDIVIDE,         "KPDiv" },
   { K_KMULTIPLY,       "kMultiply" },
+  { K_KMULTIPLY,       "KPMult" },
   { K_KENTER,          "kEnter" },
+  { K_KENTER,          "KPEnter" },
   { K_KPOINT,          "kPoint" },
+  { K_KCOMMA,          "kComma" },
+  { K_KCOMMA,          "KPComma" },
+  { K_KEQUAL,          "kEqual" },
+  { K_KEQUAL,          "KPEquals" },
 
   { K_K0,              "k0" },
   { K_K1,              "k1" },
@@ -462,14 +487,13 @@ char_u *get_special_key_name(int c, int modifiers)
       string[idx++] = '_';
       string[idx++] = (char_u)KEY2TERMCAP0(c);
       string[idx++] = KEY2TERMCAP1(c);
-    }
-    /* Not a special key, only modifiers, output directly */
-    else {
-      if (has_mbyte && (*mb_char2len)(c) > 1)
-        idx += (*mb_char2bytes)(c, string + idx);
-      else if (vim_isprintc(c))
+    } else {
+      // Not a special key, only modifiers, output directly.
+      if (utf_char2len(c) > 1) {
+        idx += utf_char2bytes(c, string + idx);
+      } else if (vim_isprintc(c)) {
         string[idx++] = (char_u)c;
-      else {
+      } else {
         s = transchar(c);
         while (*s)
           string[idx++] = *s++;
@@ -524,14 +548,12 @@ unsigned int trans_special(const char_u **srcp, const size_t src_len,
     dst[dlen++] = K_SPECIAL;
     dst[dlen++] = (char_u)KEY2TERMCAP0(key);
     dst[dlen++] = KEY2TERMCAP1(key);
-  } else if (has_mbyte && !keycode) {
-    dlen += (unsigned int)(*mb_char2bytes)(key, dst + dlen);
-  } else if (keycode) {
+  } else if (!keycode) {
+    dlen += (unsigned int)utf_char2bytes(key, dst + dlen);
+  } else {
     char_u *after = add_char2buf(key, dst + dlen);
     assert(after >= dst && (uintmax_t)(after - dst) <= UINT_MAX);
     dlen = (unsigned int)(after - dst);
-  } else {
-    dst[dlen++] = (char_u)key;
   }
 
   return dlen;
@@ -666,7 +688,7 @@ int find_special_key(const char_u **srcp, const size_t src_len, int *const modp,
         *modp = modifiers;
         *srcp = end_of_name;
         return key;
-      }
+      }  // else { ELOG("unknown key: '%s'", src); }
     }
   }
   return 0;
@@ -898,7 +920,7 @@ char_u *replace_termcodes(const char_u *from, const size_t from_len,
     }
 
     // skip multibyte char correctly
-    for (i = (*mb_ptr2len_len)(src, (int) (end - src) + 1); i > 0; i--) {
+    for (i = utfc_ptr2len_len(src, (int)(end - src) + 1); i > 0; i--) {
       // If the character is K_SPECIAL, replace it with K_SPECIAL
       // KS_SPECIAL KE_FILLER.
       // If compiled with the GUI replace CSI with K_CSI.

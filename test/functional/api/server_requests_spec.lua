@@ -1,7 +1,6 @@
 -- Test server -> client RPC scenarios. Note: unlike `rpcnotify`, to evaluate
 -- `rpcrequest` calls we need the client event loop to be running.
 local helpers = require('test.functional.helpers')(after_each)
-local Paths = require('test.config.paths')
 
 local clear, nvim, eval = helpers.clear, helpers.nvim, helpers.eval
 local eq, neq, run, stop = helpers.eq, helpers.neq, helpers.run, helpers.stop
@@ -9,9 +8,9 @@ local nvim_prog, command, funcs = helpers.nvim_prog, helpers.command, helpers.fu
 local source, next_msg = helpers.source, helpers.next_msg
 local ok = helpers.ok
 local meths = helpers.meths
-local spawn, nvim_argv = helpers.spawn, helpers.nvim_argv
+local spawn, merge_args = helpers.spawn, helpers.merge_args
 local set_session = helpers.set_session
-local expect_err = helpers.expect_err
+local meth_pcall = helpers.meth_pcall
 
 describe('server -> client', function()
   local cid
@@ -23,7 +22,7 @@ describe('server -> client', function()
 
   it('handles unexpected closed stream while preparing RPC response', function()
     source([[
-      let g:_nvim_args = [v:progpath, '--embed', '-n', '-u', 'NONE', '-i', 'NONE', ]
+      let g:_nvim_args = [v:progpath, '--embed', '--headless', '-n', '-u', 'NONE', '-i', 'NONE', ]
       let ch1 = jobstart(g:_nvim_args, {'rpc': v:true})
       let child1_ch = rpcrequest(ch1, "nvim_get_api_info")[0]
       call rpcnotify(ch1, 'nvim_eval', 'rpcrequest('.child1_ch.', "nvim_get_api_info")')
@@ -189,7 +188,7 @@ describe('server -> client', function()
     end
 
     before_each(function()
-      command("let vim = rpcstart('"..nvim_prog.."', ['-u', 'NONE', '-i', 'NONE', '--cmd', 'set noswapfile', '--embed'])")
+      command("let vim = rpcstart('"..nvim_prog.."', ['-u', 'NONE', '-i', 'NONE', '--cmd', 'set noswapfile', '--embed', '--headless'])")
       neq(0, eval('vim'))
     end)
 
@@ -222,8 +221,8 @@ describe('server -> client', function()
     end)
 
     it('returns an error if the request failed', function()
-      expect_err('Vim:Invalid method name',
-                 eval, "rpcrequest(vim, 'does-not-exist')")
+      eq({false, "Vim:Error invoking 'does-not-exist' on channel 3:\nInvalid method: does-not-exist" },
+         meth_pcall(eval, "rpcrequest(vim, 'does-not-exist')"))
     end)
   end)
 
@@ -243,8 +242,8 @@ describe('server -> client', function()
         \ 'rpc': v:true
         \ }
       ]])
-      local lua_prog = Paths.test_lua_prg
-      meths.set_var("args", {lua_prog, 'test/functional/api/rpc_fixture.lua'})
+      meths.set_var("args", {helpers.test_lua_prg,
+                             'test/functional/api/rpc_fixture.lua'})
       jobid = eval("jobstart(g:args, g:job_opts)")
       neq(0, 'jobid')
     end)
@@ -268,6 +267,7 @@ describe('server -> client', function()
   end)
 
   describe('connecting to another (peer) nvim', function()
+    local nvim_argv = merge_args(helpers.nvim_argv, {'--headless'})
     local function connect_test(server, mode, address)
       local serverpid = funcs.getpid()
       local client = spawn(nvim_argv)

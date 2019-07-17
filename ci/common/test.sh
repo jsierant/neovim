@@ -3,10 +3,7 @@
 
 submit_coverage() {
   if [ -n "${GCOV}" ]; then
-    if curl --fail --output codecov.bash --silent https://codecov.io/bash; then
-      bash codecov.bash -c -F "$1" || echo "codecov upload failed."
-      rm -f codecov.bash
-    fi
+    "${CI_DIR}/common/submit_coverage.sh" "$@" || echo 'codecov upload failed.'
   fi
 }
 
@@ -32,10 +29,13 @@ check_core_dumps() {
     shift
   fi
   local app="${1:-${BUILD_DIR}/bin/nvim}"
+  local cores
   if test "${TRAVIS_OS_NAME}" = osx ; then
-    local cores="$(find /cores/ -type f -print)"
+    cores="$(find /cores/ -type f -print)"
+    local _sudo='sudo'
   else
-    local cores="$(find ./ -type f -name 'core.*' -print)"
+    cores="$(find ./ -type f -name 'core.*' -print)"
+    local _sudo=
   fi
 
   if test -z "${cores}" ; then
@@ -45,7 +45,7 @@ check_core_dumps() {
   for core in $cores; do
     if test "$del" = "1" ; then
       print_core "$app" "$core" >&2
-      rm "$core"
+      "$_sudo" rm "$core"
     else
       print_core "$app" "$core"
     fi
@@ -81,7 +81,7 @@ valgrind_check() {
 
 asan_check() {
   if test "${CLANG_SANITIZER}" = "ASAN_UBSAN" ; then
-    check_logs "${1}" "*san.*" | asan_symbolize
+    check_logs "${1}" "*san.*" | $ASAN_SYMBOLIZE
   fi
 }
 
@@ -92,7 +92,7 @@ run_unittests() {(
     fail 'unittests' F 'Unit tests failed'
   fi
   submit_coverage unittest
-  check_core_dumps "$(which luajit)"
+  check_core_dumps "$(command -v luajit)"
   exit_suite
 )}
 

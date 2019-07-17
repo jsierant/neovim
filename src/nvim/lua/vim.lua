@@ -1,3 +1,39 @@
+-- Nvim-Lua stdlib: the `vim` module (:help lua-stdlib)
+--
+-- Lua code lives in one of three places:
+--    1. runtime/lua/vim/ (the runtime): For "nice to have" features, e.g. the
+--       `inspect` and `lpeg` modules.
+--    2. runtime/lua/vim/shared.lua: Code shared between Nvim and tests.
+--    3. src/nvim/lua/: Compiled-into Nvim itself.
+--
+-- Guideline: "If in doubt, put it in the runtime".
+--
+-- Most functions should live directly on `vim.`, not sub-modules. The only
+-- "forbidden" names are those claimed by legacy `if_lua`:
+--    $ vim
+--    :lua for k,v in pairs(vim) do print(k) end
+--    buffer
+--    open
+--    window
+--    lastline
+--    firstline
+--    type
+--    line
+--    eval
+--    dict
+--    beep
+--    list
+--    command
+--
+-- Reference (#6580):
+--    - https://github.com/luafun/luafun
+--    - https://github.com/rxi/lume
+--    - http://leafo.net/lapis/reference/utilities.html
+--    - https://github.com/torch/paths
+--    - https://github.com/bakpakin/Fennel (pretty print, repl)
+--    - https://github.com/howl-editor/howl/tree/master/lib/howl/util
+
+
 -- Internal-only until comments in #8107 are addressed.
 -- Returns:
 --    {errcode}, {output}
@@ -13,7 +49,7 @@ local function _os_proc_info(pid)
   if pid == nil or pid <= 0 or type(pid) ~= 'number' then
     error('invalid pid')
   end
-  local cmd = { 'ps', '-p', pid, '-o', 'ucomm=', }
+  local cmd = { 'ps', '-p', pid, '-o', 'comm=', }
   local err, name = _system(cmd)
   if 1 == err and string.gsub(name, '%s*', '') == '' then
     return {}  -- Process not found.
@@ -23,7 +59,7 @@ local function _os_proc_info(pid)
   end
   local _, ppid = _system({ 'ps', '-p', pid, '-o', 'ppid=', })
   -- Remove trailing whitespace.
-  name = string.gsub(name, '%s+$', '')
+  name = string.gsub(string.gsub(name, '%s+$', ''), '^.*/', '')
   ppid = string.gsub(ppid, '%s+$', '')
   ppid = tonumber(ppid) == nil and -1 or tonumber(ppid)
   return {
@@ -118,11 +154,44 @@ local function _update_package_paths()
   last_nvim_paths = cur_nvim_paths
 end
 
+--- Return a human-readable representation of the given object.
+---
+--@see https://github.com/kikito/inspect.lua
+local function inspect(object, options)  -- luacheck: no unused
+  error(object, options)  -- Stub for gen_vimdoc.py
+end
+
+local function __index(t, key)
+  if key == 'inspect' then
+    t.inspect = require('vim.inspect')
+    return t.inspect
+  elseif require('vim.shared')[key] ~= nil then
+    -- Expose all `vim.shared` functions on the `vim` module.
+    t[key] = require('vim.shared')[key]
+    return t[key]
+  end
+end
+
+--- Defers the wrapped callback until when the nvim API is safe to call.
+---
+--- See |vim-loop-callbacks|
+local function schedule_wrap(cb)
+  return (function (...)
+    local args = {...}
+    vim.schedule(function() cb(unpack(args)) end)
+  end)
+end
+
 local module = {
   _update_package_paths = _update_package_paths,
   _os_proc_children = _os_proc_children,
   _os_proc_info = _os_proc_info,
   _system = _system,
+  schedule_wrap = schedule_wrap,
 }
+
+setmetatable(module, {
+  __index = __index
+})
 
 return module

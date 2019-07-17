@@ -1,6 +1,5 @@
 local helpers = require('test.functional.helpers')(after_each)
 local Screen = require('test.functional.ui.screen')
-local global_helpers = require('test.helpers')
 
 local NIL = helpers.NIL
 local clear, nvim, eq, neq = helpers.clear, helpers.nvim, helpers.eq, helpers.neq
@@ -14,14 +13,64 @@ local ok, nvim_async, feed = helpers.ok, helpers.nvim_async, helpers.feed
 local os_name = helpers.os_name
 local request = helpers.request
 local source = helpers.source
+local next_msg = helpers.next_msg
 
-local expect_err = global_helpers.expect_err
-local format_string = global_helpers.format_string
-local intchar2lua = global_helpers.intchar2lua
-local mergedicts_copy = global_helpers.mergedicts_copy
+local expect_err = helpers.expect_err
+local format_string = helpers.format_string
+local intchar2lua = helpers.intchar2lua
+local mergedicts_copy = helpers.mergedicts_copy
 
-describe('api', function()
+describe('API', function()
   before_each(clear)
+
+  it('validates requests', function()
+    -- RPC
+    expect_err('Invalid method: bogus$',
+               request, 'bogus')
+    expect_err('Invalid method: … の り 。…$',
+               request, '… の り 。…')
+    expect_err('Invalid method: <empty>$',
+               request, '')
+
+    -- Non-RPC: rpcrequest(v:servername) uses internal channel.
+    expect_err('Invalid method: … の り 。…$',
+               request, 'nvim_eval',
+               [=[rpcrequest(sockconnect('pipe', v:servername, {'rpc':1}), '… の り 。…')]=])
+    expect_err('Invalid method: bogus$',
+               request, 'nvim_eval',
+               [=[rpcrequest(sockconnect('pipe', v:servername, {'rpc':1}), 'bogus')]=])
+
+    -- XXX: This must be the last one, else next one will fail:
+    --      "Packer instance already working. Use another Packer ..."
+    expect_err("can't serialize object$",
+               request, nil)
+  end)
+
+  it('handles errors in async requests', function()
+    local error_types = meths.get_api_info()[2].error_types
+    nvim_async('bogus')
+    eq({'notification', 'nvim_error_event',
+        {error_types.Exception.id, 'Invalid method: nvim_bogus'}}, next_msg())
+    -- error didn't close channel.
+    eq(2, eval('1+1'))
+  end)
+
+  it('failed async request emits nvim_error_event', function()
+    local error_types = meths.get_api_info()[2].error_types
+    nvim_async('command', 'bogus')
+    eq({'notification', 'nvim_error_event',
+        {error_types.Exception.id, 'Vim:E492: Not an editor command: bogus'}},
+        next_msg())
+    -- error didn't close channel.
+    eq(2, eval('1+1'))
+  end)
+
+  it('does not set CA_COMMAND_BUSY #7254', function()
+    nvim('command', 'split')
+    nvim('command', 'autocmd WinEnter * startinsert')
+    nvim('command', 'wincmd w')
+    eq({mode='i', blocking=false}, nvim("get_mode"))
+  end)
 
   describe('nvim_command', function()
     it('works', function()
@@ -50,7 +99,7 @@ describe('api', function()
     end)
 
     it('VimL execution error: fails with specific error', function()
-      local status, rv = pcall(nvim, "command_output", "buffer 23487")
+      local status, rv = pcall(nvim, "command", "buffer 23487")
       eq(false, status)                 -- nvim_command() failed.
       eq("E86: Buffer 23487 does not exist", string.match(rv, "E%d*:.*"))
       eq('', eval('v:errmsg'))  -- v:errmsg was not updated.
@@ -147,7 +196,7 @@ describe('api', function()
     end)
 
     it("VimL error: returns error details, does NOT update v:errmsg", function()
-      expect_err('E121: Undefined variable: bogus', request,
+      expect_err('E121: Undefined variable: bogus$', request,
                  'nvim_eval', 'bogus expression')
       eq('', eval('v:errmsg'))  -- v:errmsg was not updated.
     end)
@@ -162,7 +211,7 @@ describe('api', function()
     end)
 
     it("VimL validation error: returns specific error, does NOT update v:errmsg", function()
-      expect_err('E117: Unknown function: bogus function', request,
+      expect_err('E117: Unknown function: bogus function$', request,
                  'nvim_call_function', 'bogus function', {'arg1'})
       expect_err('E119: Not enough arguments for function: atan', request,
                  'nvim_call_function', 'atan', {})
@@ -171,11 +220,11 @@ describe('api', function()
     end)
 
     it("VimL error: returns error details, does NOT update v:errmsg", function()
-      expect_err('E808: Number or Float required', request,
+      expect_err('E808: Number or Float required$', request,
                  'nvim_call_function', 'atan', {'foo'})
-      expect_err('Invalid channel stream "xxx"', request,
+      expect_err('Invalid channel stream "xxx"$', request,
                  'nvim_call_function', 'chanclose', {999, 'xxx'})
-      expect_err('E900: Invalid channel id', request,
+      expect_err('E900: Invalid channel id$', request,
                  'nvim_call_function', 'chansend', {999, 'foo'})
       eq('', eval('v:exception'))
       eq('', eval('v:errmsg'))  -- v:errmsg was not updated.
@@ -187,7 +236,7 @@ describe('api', function()
           throw 'wtf'
         endfunction
       ]])
-      expect_err('wtf', request,
+      expect_err('wtf$', request,
                  'nvim_call_function', 'Foo', {})
       eq('', eval('v:exception'))
       eq('', eval('v:errmsg'))  -- v:errmsg was not updated.
@@ -201,7 +250,7 @@ describe('api', function()
         endfunction
       ]])
       -- E740
-      expect_err('Function called with too many arguments', request,
+      expect_err('Function called with too many arguments$', request,
                  'nvim_call_function', 'Foo', too_many_args)
     end)
   end)
@@ -237,23 +286,23 @@ describe('api', function()
 
     it('validates args', function()
       command('let g:d={"baz":"zub","meep":[]}')
-      expect_err('Not found: bogus', request,
+      expect_err('Not found: bogus$', request,
                  'nvim_call_dict_function', 'g:d', 'bogus', {1,2})
-      expect_err('Not a function: baz', request,
+      expect_err('Not a function: baz$', request,
                  'nvim_call_dict_function', 'g:d', 'baz', {1,2})
-      expect_err('Not a function: meep', request,
+      expect_err('Not a function: meep$', request,
                  'nvim_call_dict_function', 'g:d', 'meep', {1,2})
-      expect_err('E117: Unknown function: f', request,
+      expect_err('E117: Unknown function: f$', request,
                  'nvim_call_dict_function', { f = '' }, 'f', {1,2})
-      expect_err('Not a function: f', request,
+      expect_err('Not a function: f$', request,
                  'nvim_call_dict_function', "{ 'f': '' }", 'f', {1,2})
-      expect_err('dict argument type must be String or Dictionary', request,
+      expect_err('dict argument type must be String or Dictionary$', request,
                  'nvim_call_dict_function', 42, 'f', {1,2})
-      expect_err('Failed to evaluate dict expression', request,
+      expect_err('Failed to evaluate dict expression$', request,
                  'nvim_call_dict_function', 'foo', 'f', {1,2})
-      expect_err('dict not found', request,
+      expect_err('dict not found$', request,
                  'nvim_call_dict_function', '42', 'f', {1,2})
-      expect_err('Invalid %(empty%) function name', request,
+      expect_err('Invalid %(empty%) function name$', request,
                  'nvim_call_dict_function', "{ 'f': '' }", '', {1,2})
     end)
   end)
@@ -285,6 +334,19 @@ describe('api', function()
       eq({false, 'Error executing lua: [string "<nvim>"]:1: '..
                  "attempt to call global 'bork' (a nil value)"},
          meth_pcall(meths.execute_lua, 'bork()', {}))
+
+      eq({false, 'Error executing lua: [string "<nvim>"]:1: '..
+                 "did\nthe\nfail"},
+         meth_pcall(meths.execute_lua, 'error("did\\nthe\\nfail")', {}))
+    end)
+
+    it('uses native float values', function()
+      eq(2.5, meths.execute_lua("return select(1, ...)", {2.5}))
+      eq("2.5", meths.execute_lua("return vim.inspect(...)", {2.5}))
+
+      -- "special" float values are still accepted as return values.
+      eq(2.5, meths.execute_lua("return vim.api.nvim_eval('2.5')", {}))
+      eq("{\n  [false] = 2.5,\n  [true] = 3\n}", meths.execute_lua("return vim.inspect(vim.api.nvim_eval('2.5'))", {}))
     end)
   end)
 
@@ -318,19 +380,30 @@ describe('api', function()
     end)
   end)
 
-  describe('nvim_get_var, nvim_set_var, nvim_del_var', function()
-    it('works', function()
+  describe('set/get/del variables', function()
+    it('nvim_get_var, nvim_set_var, nvim_del_var', function()
       nvim('set_var', 'lua', {1, 2, {['3'] = 1}})
       eq({1, 2, {['3'] = 1}}, nvim('get_var', 'lua'))
       eq({1, 2, {['3'] = 1}}, nvim('eval', 'g:lua'))
       eq(1, funcs.exists('g:lua'))
       meths.del_var('lua')
       eq(0, funcs.exists('g:lua'))
-      eq({false, 'Key does not exist: lua'}, meth_pcall(meths.del_var, 'lua'))
+      eq({false, "Key not found: lua"}, meth_pcall(meths.del_var, 'lua'))
       meths.set_var('lua', 1)
+
+      -- Set locked g: var.
       command('lockvar lua')
       eq({false, 'Key is locked: lua'}, meth_pcall(meths.del_var, 'lua'))
       eq({false, 'Key is locked: lua'}, meth_pcall(meths.set_var, 'lua', 1))
+    end)
+
+    it('nvim_get_vvar, nvim_set_vvar', function()
+      -- Set readonly v: var.
+      expect_err('Key is read%-only: count$', request,
+                 'nvim_set_vvar', 'count', 42)
+      -- Set writable v: var.
+      meths.set_vvar('errmsg', 'set by API')
+      eq('set by API', meths.get_vvar('errmsg'))
     end)
 
     it('vim_set_var returns the old value', function()
@@ -766,6 +839,114 @@ describe('api', function()
     end)
   end)
 
+  describe('nvim_list_chans and nvim_get_chan_info', function()
+    before_each(function()
+      command('autocmd ChanOpen * let g:opened_event = copy(v:event)')
+      command('autocmd ChanInfo * let g:info_event = copy(v:event)')
+    end)
+    local testinfo = {
+      stream = 'stdio',
+      id = 1,
+      mode = 'rpc',
+      client = {},
+    }
+    local stderr = {
+      stream = 'stderr',
+      id = 2,
+      mode = 'bytes',
+    }
+
+    it('returns {} for invalid channel', function()
+      eq({}, meths.get_chan_info(0))
+      eq({}, meths.get_chan_info(-1))
+      -- more preallocated numbers might be added, try something high
+      eq({}, meths.get_chan_info(10))
+    end)
+
+    it('works for stdio channel', function()
+      eq({[1]=testinfo,[2]=stderr}, meths.list_chans())
+      eq(testinfo, meths.get_chan_info(1))
+      eq(stderr, meths.get_chan_info(2))
+
+      meths.set_client_info("functionaltests",
+                            {major=0, minor=3, patch=17},
+                            'ui',
+                            {do_stuff={n_args={2,3}}},
+                            {license= 'Apache2'})
+      local info = {
+        stream = 'stdio',
+        id = 1,
+        mode = 'rpc',
+        client = {
+          name='functionaltests',
+          version={major=0, minor=3, patch=17},
+          type='ui',
+          methods={do_stuff={n_args={2,3}}},
+          attributes={license='Apache2'},
+        },
+      }
+      eq({info=info}, meths.get_var("info_event"))
+      eq({[1]=info, [2]=stderr}, meths.list_chans())
+      eq(info, meths.get_chan_info(1))
+    end)
+
+    it('works for job channel', function()
+      eq(3, eval("jobstart(['cat'], {'rpc': v:true})"))
+      local info = {
+        stream='job',
+        id=3,
+        mode='rpc',
+        client={},
+      }
+      eq({info=info}, meths.get_var("opened_event"))
+      eq({[1]=testinfo,[2]=stderr,[3]=info}, meths.list_chans())
+      eq(info, meths.get_chan_info(3))
+      eval('rpcrequest(3, "nvim_set_client_info", "amazing-cat", {}, "remote",'..
+                       '{"nvim_command":{"n_args":1}},'.. -- and so on
+                       '{"description":"The Amazing Cat"})')
+      info = {
+        stream='job',
+        id=3,
+        mode='rpc',
+        client = {
+          name='amazing-cat',
+          version={major=0},
+          type='remote',
+          methods={nvim_command={n_args=1}},
+          attributes={description="The Amazing Cat"},
+        },
+      }
+      eq({info=info}, meths.get_var("info_event"))
+      eq({[1]=testinfo,[2]=stderr,[3]=info}, meths.list_chans())
+
+      eq({false, "Vim:Error invoking 'nvim_set_current_buf' on channel 3 (amazing-cat):\nWrong type for argument 1, expecting Buffer"},
+         meth_pcall(eval, 'rpcrequest(3, "nvim_set_current_buf", -1)'))
+    end)
+
+    it('works for :terminal channel', function()
+      command(":terminal")
+      eq({id=1}, meths.get_current_buf())
+      eq(3, meths.buf_get_option(1, "channel"))
+
+      local info = {
+        stream='job',
+        id=3,
+        mode='terminal',
+        buffer = 1,
+        pty='?',
+      }
+      local event = meths.get_var("opened_event")
+      if not iswin() then
+        info.pty = event.info.pty
+        neq(nil, string.match(info.pty, "^/dev/"))
+      end
+      eq({info=info}, event)
+      info.buffer = {id=1}
+      eq({[1]=testinfo,[2]=stderr,[3]=info}, meths.list_chans())
+      eq(info, meths.get_chan_info(3))
+    end)
+  end)
+
   describe('nvim_call_atomic', function()
     it('works', function()
       meths.buf_set_lines(0, 0, -1, true, {'first'})
@@ -815,7 +996,7 @@ describe('api', function()
         {'i_am_not_a_method', {'xx'}},
         {'nvim_set_var', {'avar', 10}},
       }
-      eq({{}, {0, error_types.Exception.id, 'Invalid method name'}},
+      eq({{}, {0, error_types.Exception.id, 'Invalid method: i_am_not_a_method'}},
          meths.call_atomic(req))
       eq(5, meths.get_var('avar'))
     end)
@@ -828,7 +1009,7 @@ describe('api', function()
       }
       local status, err = pcall(meths.call_atomic, req)
       eq(false, status)
-      ok(err:match(' All items in calls array must be arrays of size 2') ~= nil)
+      ok(err:match('Items in calls array must be arrays of size 2') ~= nil)
       -- call before was done, but not after
       eq(1, meths.get_var('avar'))
 
@@ -838,7 +1019,7 @@ describe('api', function()
       }
       status, err = pcall(meths.call_atomic, req)
       eq(false, status)
-      ok(err:match('All items in calls array must be arrays') ~= nil)
+      ok(err:match('Items in calls array must be arrays') ~= nil)
       eq({2,3}, meths.get_var('bvar'))
 
       req = {
@@ -1109,20 +1290,27 @@ describe('api', function()
 
   describe('nvim_list_uis', function()
     it('returns empty if --headless', function()
-      -- --embed implies --headless.
+      -- Test runner defaults to --headless.
       eq({}, nvim("list_uis"))
     end)
     it('returns attached UIs', function()
       local screen = Screen.new(20, 4)
-      screen:attach()
+      screen:attach({override=true})
       local expected = {
         {
+          chan = 1,
           ext_cmdline = false,
           ext_popupmenu = false,
           ext_tabline = false,
           ext_wildmenu = false,
+          ext_linegrid = screen._options.ext_linegrid or false,
+          ext_multigrid = false,
+          ext_hlstate = false,
+          ext_termcolors = false,
+          ext_messages = false,
           height = 4,
           rgb = true,
+          override = true,
           width = 20,
         }
       }
@@ -1131,19 +1319,124 @@ describe('api', function()
       screen:detach()
       screen = Screen.new(44, 99)
       screen:attach({ rgb = false })
-      expected = {
-        {
-          ext_cmdline = false,
-          ext_popupmenu = false,
-          ext_tabline = false,
-          ext_wildmenu = false,
-          height = 99,
-          rgb = false,
-          width = 44,
-        }
-      }
+      expected[1].rgb = false
+      expected[1].override = false
+      expected[1].width = 44
+      expected[1].height = 99
       eq(expected, nvim("list_uis"))
     end)
   end)
 
+  describe('nvim_create_namespace', function()
+    it('works', function()
+      eq({}, meths.get_namespaces())
+      eq(1, meths.create_namespace("ns-1"))
+      eq(2, meths.create_namespace("ns-2"))
+      eq(1, meths.create_namespace("ns-1"))
+      eq({["ns-1"]=1, ["ns-2"]=2}, meths.get_namespaces())
+      eq(3, meths.create_namespace(""))
+      eq(4, meths.create_namespace(""))
+      eq({["ns-1"]=1, ["ns-2"]=2}, meths.get_namespaces())
+    end)
+  end)
+
+  describe('nvim_create_buf', function()
+    it('works', function()
+      eq({id=2}, meths.create_buf(true, false))
+      eq({id=3}, meths.create_buf(false, false))
+      eq('  1 %a   "[No Name]"                    line 1\n'..
+         '  2  h   "[No Name]"                    line 0',
+         meths.command_output("ls"))
+      -- current buffer didn't change
+      eq({id=1}, meths.get_current_buf())
+
+      local screen = Screen.new(20, 4)
+      screen:attach()
+      meths.buf_set_lines(2, 0, -1, true, {"some text"})
+      meths.set_current_buf(2)
+      screen:expect([[
+        ^some text           |
+        {1:~                   }|
+        {1:~                   }|
+                            |
+      ]], {
+        [1] = {bold = true, foreground = Screen.colors.Blue1},
+      })
+    end)
+
+    it('can change buftype before visiting', function()
+      meths.set_option("hidden", false)
+      eq({id=2}, meths.create_buf(true, false))
+      meths.buf_set_option(2, "buftype", "nofile")
+      meths.buf_set_lines(2, 0, -1, true, {"test text"})
+      command("split | buffer 2")
+      eq({id=2}, meths.get_current_buf())
+      -- if the buf_set_option("buftype") didn't work, this would error out.
+      command("close")
+      eq({id=1}, meths.get_current_buf())
+    end)
+
+    it("doesn't cause BufEnter or BufWinEnter autocmds", function()
+      command("let g:fired = v:false")
+      command("au BufEnter,BufWinEnter * let g:fired = v:true")
+
+      eq({id=2}, meths.create_buf(true, false))
+      meths.buf_set_lines(2, 0, -1, true, {"test", "text"})
+
+      eq(false, eval('g:fired'))
+    end)
+
+    it('|scratch-buffer|', function()
+      eq({id=2}, meths.create_buf(false, true))
+      eq({id=3}, meths.create_buf(true, true))
+      eq({id=4}, meths.create_buf(true, true))
+      local scratch_bufs = { 2, 3, 4 }
+      eq('  1 %a   "[No Name]"                    line 1\n'..
+         '  3  h   "[Scratch]"                    line 0\n'..
+         '  4  h   "[Scratch]"                    line 0',
+         meths.command_output("ls"))
+      -- current buffer didn't change
+      eq({id=1}, meths.get_current_buf())
+
+      local screen = Screen.new(20, 4)
+      screen:set_default_attr_ids({
+        [1] = {bold = true, foreground = Screen.colors.Blue1},
+      })
+      screen:attach()
+
+      --
+      -- Editing a scratch-buffer does NOT change its properties.
+      --
+      local edited_buf = 2
+      meths.buf_set_lines(edited_buf, 0, -1, true, {"some text"})
+      for _,b in ipairs(scratch_bufs) do
+        eq('nofile', meths.buf_get_option(b, 'buftype'))
+        eq('hide', meths.buf_get_option(b, 'bufhidden'))
+        eq(false, meths.buf_get_option(b, 'swapfile'))
+      end
+
+      --
+      -- Visiting a scratch-buffer DOES NOT change its properties.
+      --
+      meths.set_current_buf(edited_buf)
+      screen:expect([[
+        ^some text           |
+        {1:~                   }|
+        {1:~                   }|
+                            |
+      ]])
+      eq('nofile', meths.buf_get_option(edited_buf, 'buftype'))
+      eq('hide', meths.buf_get_option(edited_buf, 'bufhidden'))
+      eq(false, meths.buf_get_option(edited_buf, 'swapfile'))
+
+      -- scratch buffer can be wiped without error
+      command('bwipe')
+      screen:expect([[
+        ^                    |
+        {1:~                   }|
+        {1:~                   }|
+                            |
+      ]])
+    end)
+  end)
 end)

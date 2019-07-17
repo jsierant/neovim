@@ -20,6 +20,7 @@
 uv_tty_t tty;
 uv_tty_t tty_out;
 
+bool owns_tty(void);  // silence -Wmissing-prototypes
 bool owns_tty(void)
 {
 #ifdef _WIN32
@@ -150,7 +151,12 @@ int main(int argc, char **argv)
   }
 
   if (argc > 1) {
-    int count = atoi(argv[1]);
+    errno = 0;
+    int count = (int)strtol(argv[1], NULL, 10);
+    if (errno != 0) {
+      abort();
+    }
+    count = (count < 0 || count > 99999) ? 0 : count;
     for (int i = 0; i < count; i++) {
       printf("line%d\n", i);
     }

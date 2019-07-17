@@ -34,7 +34,7 @@ typedef enum {
   kInputEof
 } InbufPollResult;
 
-static Stream read_stream = {.closed = true};
+static Stream read_stream = { .closed = true };  // Input before UI starts.
 static RBuffer *input_buffer = NULL;
 static bool input_eof = false;
 static int global_fd = -1;
@@ -50,7 +50,12 @@ void input_init(void)
   input_buffer = rbuffer_new(INPUT_BUFFER_SIZE + MAX_KEY_CODE_LEN);
 }
 
-/// Gets the file from which input was gathered at startup.
+void input_global_fd_init(int fd)
+{
+  global_fd = fd;
+}
+
+/// Global TTY (or pipe for "-es") input stream, before UI starts.
 int input_global_fd(void)
 {
   return global_fd;
@@ -62,9 +67,9 @@ void input_start(int fd)
     return;
   }
 
-  global_fd = fd;
+  input_global_fd_init(fd);
   rstream_init_fd(&main_loop, &read_stream, fd, READ_BUFFER_SIZE);
-  rstream_start(&read_stream, read_cb, NULL);
+  rstream_start(&read_stream, input_read_cb, NULL);
 }
 
 void input_stop(void)
@@ -108,6 +113,11 @@ int os_inchar(uint8_t *buf, int maxlen, int ms, int tb_change_cnt)
     }
   } else {
     if ((result = inbuf_poll((int)p_ut)) == kInputNone) {
+      if (read_stream.closed && silent_mode) {
+        // Drained eventloop & initial input; exit silent/batch-mode (-es/-Es).
+        read_error_exit();
+      }
+
       if (trigger_cursorhold() && !typebuf_changed(tb_change_cnt)) {
         create_cursorhold_event();
       } else {
@@ -231,6 +241,53 @@ size_t input_enqueue(String keys)
   return rv;
 }
 
+static uint8_t check_multiclick(int code, int grid, int row, int col)
+{
+  static int orig_num_clicks = 0;
+  static int orig_mouse_code = 0;
+  static int orig_mouse_grid = 0;
+  static int orig_mouse_col = 0;
+  static int orig_mouse_row = 0;
+  static uint64_t orig_mouse_time = 0;  // time of previous mouse click
+
+  if (code == KE_LEFTRELEASE || code == KE_RIGHTRELEASE
+      || code == KE_MIDDLERELEASE) {
+    return 0;
+  }
+  uint64_t mouse_time = os_hrtime();    // time of current mouse click (ns)
+
+  // compute the time elapsed since the previous mouse click and
+  // convert p_mouse from ms to ns
+  uint64_t timediff = mouse_time - orig_mouse_time;
+  uint64_t mouset = (uint64_t)p_mouset * 1000000;
+  if (code == orig_mouse_code
+      && timediff < mouset
+      && orig_num_clicks != 4
+      && orig_mouse_grid == grid
+      && orig_mouse_col == col
+      && orig_mouse_row == row) {
+    orig_num_clicks++;
+  } else {
+    orig_num_clicks = 1;
+  }
+  orig_mouse_code = code;
+  orig_mouse_grid = grid;
+  orig_mouse_col = col;
+  orig_mouse_row = row;
+  orig_mouse_time = mouse_time;
+
+  uint8_t modifiers = 0;
+  if (orig_num_clicks == 2) {
+    modifiers |= MOD_MASK_2CLICK;
+  } else if (orig_num_clicks == 3) {
+    modifiers |= MOD_MASK_3CLICK;
+  } else if (orig_num_clicks == 4) {
+    modifiers |= MOD_MASK_4CLICK;
+  }
+  return modifiers;
+}
+
+
 // Mouse event handling code(Extract row/col if available and detect multiple
 // clicks)
 static unsigned int handle_mouse_event(char **ptr, uint8_t *buf,
@@ -269,48 +326,15 @@ static unsigned int handle_mouse_event(char **ptr, uint8_t *buf,
       if (row >= Rows) {
         row = (int)Rows - 1;
       }
+      mouse_grid = 0;
       mouse_row = row;
       mouse_col = col;
     }
     *ptr += advance;
   }
 
-  static int orig_num_clicks = 0;
-  if (mouse_code != KE_LEFTRELEASE && mouse_code != KE_RIGHTRELEASE
-      && mouse_code != KE_MIDDLERELEASE) {
-      static int orig_mouse_code = 0;
-      static int orig_mouse_col = 0;
-      static int orig_mouse_row = 0;
-      static uint64_t orig_mouse_time = 0;  // time of previous mouse click
-      uint64_t mouse_time = os_hrtime();    // time of current mouse click (ns)
-
-      // compute the time elapsed since the previous mouse click and
-      // convert p_mouse from ms to ns
-      uint64_t timediff = mouse_time - orig_mouse_time;
-      uint64_t mouset = (uint64_t)p_mouset * 1000000;
-      if (mouse_code == orig_mouse_code
-          && timediff < mouset
-          && orig_num_clicks != 4
-          && orig_mouse_col == mouse_col
-          && orig_mouse_row == mouse_row) {
-        orig_num_clicks++;
-      } else {
-        orig_num_clicks = 1;
-      }
-      orig_mouse_code = mouse_code;
-      orig_mouse_col = mouse_col;
-      orig_mouse_row = mouse_row;
-      orig_mouse_time = mouse_time;
-  }
-
-  uint8_t modifiers = 0;
-  if (orig_num_clicks == 2) {
-    modifiers |= MOD_MASK_2CLICK;
-  } else if (orig_num_clicks == 3) {
-    modifiers |= MOD_MASK_3CLICK;
-  } else if (orig_num_clicks == 4) {
-    modifiers |= MOD_MASK_4CLICK;
-  }
+  uint8_t modifiers = check_multiclick(mouse_code, mouse_grid,
+                                       mouse_row, mouse_col);
 
   if (modifiers) {
     if (buf[1] != KS_MODIFIER) {
@@ -327,6 +351,30 @@ static unsigned int handle_mouse_event(char **ptr, uint8_t *buf,
   }
 
   return bufsize;
+}
+
+size_t input_enqueue_mouse(int code, uint8_t modifier,
+                           int grid, int row, int col)
+{
+  modifier |= check_multiclick(code, grid, row, col);
+  uint8_t buf[7], *p = buf;
+  if (modifier) {
+    p[0] = K_SPECIAL;
+    p[1] = KS_MODIFIER;
+    p[2] = modifier;
+    p += 3;
+  }
+  p[0] = K_SPECIAL;
+  p[1] = KS_EXTRA;
+  p[2] = (uint8_t)code;
+
+  mouse_grid = grid;
+  mouse_row = row;
+  mouse_col = col;
+
+  size_t written = 3 + (size_t)(p-buf);
+  rbuffer_write(input_buffer, (char *)buf, written);
+  return written;
 }
 
 /// @return true if the main loop is blocked and waiting for input.
@@ -346,6 +394,8 @@ static bool input_poll(int ms)
     blocking = true;
     multiqueue_process_events(ch_before_blocking_events);
   }
+  DLOG("blocking... events_enabled=%d events_pending=%d", events_enabled,
+       !multiqueue_empty(main_loop.events));
   LOOP_PROCESS_EVENTS_UNTIL(&main_loop, NULL, ms, input_ready() || input_eof);
   blocking = false;
 
@@ -376,11 +426,11 @@ static InbufPollResult inbuf_poll(int ms)
   return input_eof ? kInputEof : kInputNone;
 }
 
-static void read_cb(Stream *stream, RBuffer *buf, size_t c, void *data,
-    bool at_eof)
+static void input_read_cb(Stream *stream, RBuffer *buf, size_t c, void *data,
+                          bool at_eof)
 {
   if (at_eof) {
-    input_eof = true;
+    input_done();
   }
 
   assert(rbuffer_space(input_buffer) >= rbuffer_size(buf));
@@ -438,8 +488,9 @@ static bool input_ready(void)
 // Exit because of an input read error.
 static void read_error_exit(void)
 {
-  if (silent_mode)      /* Normal way to exit for "ex -s" */
+  if (silent_mode) {  // Normal way to exit for "nvim -es".
     getout(0);
+  }
   STRCPY(IObuff, _("Vim: Error reading input, exiting...\n"));
   preserve_exit();
 }

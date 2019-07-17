@@ -2,6 +2,7 @@
 # cross compiling we still want to build for the HOST system, whenever
 # writing a recipe that is meant for cross-compile, use the HOSTDEPS_* variables
 # instead of DEPS_* - check the main CMakeLists.txt for a list.
+enable_language(CXX)
 
 # BuildGperf(CONFIGURE_COMMAND ... BUILD_COMMAND ... INSTALL_COMMAND ...)
 # Reusable function to build Gperf, wraps ExternalProject_Add.
@@ -36,11 +37,15 @@ function(BuildGperf)
     INSTALL_COMMAND "${_gperf_INSTALL_COMMAND}")
 endfunction()
 
+set(GPERF_BUILDARGS CC=${HOSTDEPS_C_COMPILER} CXX=${HOSTDEPS_CXX_COMPILER}
+    LD=${HOSTDEPS_C_COMPILER})
+
 if(UNIX OR (MINGW AND CMAKE_CROSSCOMPILING))
 
   BuildGperf(
     CONFIGURE_COMMAND ${DEPS_BUILD_DIR}/src/gperf/configure
-      --prefix=${HOSTDEPS_INSTALL_DIR} MAKE=${MAKE_PRG}
+      --prefix=${HOSTDEPS_INSTALL_DIR}
+      MAKE=${MAKE_PRG} ${GPERF_BUILDARGS}
     INSTALL_COMMAND ${MAKE_PRG} install)
 
 elseif(MSVC OR MINGW)

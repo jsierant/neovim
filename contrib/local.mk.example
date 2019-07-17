@@ -7,9 +7,8 @@
 # These CFLAGS can be used in addition to those specified in CMakeLists.txt:
 # CMAKE_EXTRA_FLAGS="-DCMAKE_C_FLAGS=-ftrapv -Wlogical-op"
 
-# By default, the jemalloc family of memory allocation functions are used.
-# Uncomment the following to instead use libc memory allocation functions.
-# CMAKE_EXTRA_FLAGS += -DENABLE_JEMALLOC=OFF
+# To turn compiler warnings into errors:
+# CMAKE_EXTRA_FLAGS += "-DCMAKE_C_FLAGS=${CMAKE_C_FLAGS} -Werror"
 
 # Sets the build type; defaults to Debug. Valid values:
 #
@@ -36,7 +35,6 @@
 # them.
 #
 # DEPS_CMAKE_FLAGS += -DUSE_BUNDLED_BUSTED=OFF
-# DEPS_CMAKE_FLAGS += -DUSE_BUNDLED_JEMALLOC=OFF
 # DEPS_CMAKE_FLAGS += -DUSE_BUNDLED_LIBTERMKEY=OFF
 # DEPS_CMAKE_FLAGS += -DUSE_BUNDLED_LIBUV=OFF
 # DEPS_CMAKE_FLAGS += -DUSE_BUNDLED_LIBVTERM=OFF

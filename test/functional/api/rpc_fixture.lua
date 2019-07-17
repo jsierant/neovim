@@ -1,7 +1,5 @@
-local deps_prefix = './.deps/usr'
-if os.getenv('DEPS_PREFIX') then
-  deps_prefix = os.getenv('DEPS_PREFIX')
-end
+local deps_prefix = (os.getenv('DEPS_PREFIX') and os.getenv('DEPS_PREFIX')
+                     or './.deps/usr')
 
 package.path = deps_prefix .. '/share/lua/5.1/?.lua;' ..
                deps_prefix .. '/share/lua/5.1/?/init.lua;' ..
@@ -31,7 +29,7 @@ end
 
 local function on_notification(event, args)
   if event == 'ping' and #args == 0 then
-    session:notify("vim_eval", "rpcnotify(g:channel, 'pong')")
+    session:notify("nvim_eval", "rpcnotify(g:channel, 'pong')")
   end
 end
 

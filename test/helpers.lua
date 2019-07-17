@@ -1,6 +1,10 @@
+require('vim.compat')
+local shared = require('vim.shared')
 local assert = require('luassert')
 local luv = require('luv')
 local lfs = require('lfs')
+local relpath = require('pl.path').relpath
+local Paths = require('test.config.paths')
 
 local quote_me = '[^.%w%+%-%@%_%/]' -- complement (needn't quote)
 local function shell_quote(str)
@@ -45,14 +49,17 @@ local check_logs_useless_lines = {
   ['See README_MISSING_SYSCALL_OR_IOCTL for guidance']=3,
 }
 
-local function eq(expected, actual)
-  return assert.are.same(expected, actual)
+local function eq(expected, actual, context)
+  return assert.are.same(expected, actual, context)
 end
-local function neq(expected, actual)
-  return assert.are_not.same(expected, actual)
+local function neq(expected, actual, context)
+  return assert.are_not.same(expected, actual, context)
 end
 local function ok(res)
   return assert.is_true(res)
+end
+local function near(actual, expected, tolerance)
+  return assert.is.near(actual, expected, tolerance)
 end
 local function matches(pat, actual)
   if nil ~= string.match(actual, pat) then
@@ -133,7 +140,6 @@ local function check_logs()
         fd:close()
         os.remove(file)
         if #lines > 0 then
-          -- local out = os.getenv('TRAVIS_CI_BUILD') and io.stdout or io.stderr
           local out = io.stdout
           out:write(start_msg .. '\n')
           out:write('= ' .. table.concat(lines, '\n= ') .. '\n')
@@ -231,6 +237,11 @@ local function hasenv(name)
   return nil
 end
 
+local function deps_prefix()
+  local env = os.getenv('DEPS_PREFIX')
+  return (env and env ~= '') and env or '.deps/usr'
+end
+
 local tests_skipped = 0
 
 local function check_cores(app, force)
@@ -242,7 +253,7 @@ local function check_cores(app, force)
   -- Workspace-local $TMPDIR, scrubbed and pattern-escaped.
   -- "./Xtest-tmpdir/" => "Xtest%-tmpdir"
   local local_tmpdir = (tmpdir_is_local(tmpdir_get())
-    and tmpdir_get():gsub('^[ ./]+',''):gsub('%/+$',''):gsub('([^%w])', '%%%1')
+    and relpath(tmpdir_get()):gsub('^[ ./]+',''):gsub('%/+$',''):gsub('([^%w])', '%%%1')
     or nil)
   local db_cmd
   if hasenv('NVIM_TEST_CORE_GLOB_DIRECTORY') then
@@ -259,7 +270,7 @@ local function check_cores(app, force)
   else
     initial_path = '.'
     re = '/core[^/]*$'
-    exc_re = { '^/%.deps$', local_tmpdir }
+    exc_re = { '^/%.deps$', '^/%'..deps_prefix()..'$', local_tmpdir, '^/%node_modules$' }
     db_cmd = gdb_db_cmd
     random_skip = true
   end
@@ -325,30 +336,6 @@ local function shallowcopy(orig)
   return copy
 end
 
-local deepcopy
-
-local function id(v)
-  return v
-end
-
-local deepcopy_funcs = {
-  table = function(orig)
-    local copy = {}
-    for k, v in pairs(orig) do
-      copy[deepcopy(k)] = deepcopy(v)
-    end
-    return copy
-  end,
-  number = id,
-  string = id,
-  ['nil'] = id,
-  boolean = id,
-}
-
-deepcopy = function(orig)
-  return deepcopy_funcs[type(orig)](orig)
-end
-
 local REMOVE_THIS = {}
 
 local function mergedicts_copy(d1, d2)
@@ -411,6 +398,7 @@ local function updated(d, d2)
   return d
 end
 
+-- Concat list-like tables.
 local function concat_tables(...)
   local ret = {}
   for i = 1, select('#', ...) do
@@ -600,24 +588,6 @@ local function fixtbl_rec(tbl)
   return fixtbl(tbl)
 end
 
--- From https://github.com/premake/premake-core/blob/master/src/base/table.lua
-local function table_flatten(arr)
-  local result = {}
-  local function _table_flatten(_arr)
-    local n = #_arr
-    for i = 1, n do
-      local v = _arr[i]
-      if type(v) == "table" then
-        _table_flatten(v)
-      elseif v then
-        table.insert(result, v)
-      end
-    end
-  end
-  _table_flatten(arr)
-  return result
-end
-
 local function hexdump(str)
   local len = string.len(str)
   local dump = ""
@@ -643,8 +613,38 @@ local function hexdump(str)
   return dump .. hex .. string.rep("   ", 8 - len % 8) .. asc
 end
 
-local function read_file(name)
-  local file = io.open(name, 'r')
+-- Reads text lines from `filename` into a table.
+--
+-- filename: path to file
+-- start: start line (1-indexed), negative means "lines before end" (tail)
+local function read_file_list(filename, start)
+  local lnum = (start ~= nil and type(start) == 'number') and start or 1
+  local tail = (lnum < 0)
+  local maxlines = tail and math.abs(lnum) or nil
+  local file = io.open(filename, 'r')
+  if not file then
+    return nil
+  end
+  local lines = {}
+  local i = 1
+  for line in file:lines() do
+    if i >= start then
+      table.insert(lines, line)
+      if #lines > maxlines then
+        table.remove(lines, 1)
+      end
+    end
+    i = i + 1
+  end
+  file:close()
+  return lines
+end
+
+-- Reads the entire contents of `filename` into a string.
+--
+-- filename: path to file
+local function read_file(filename)
+  local file = io.open(filename, 'r')
   if not file then
     return nil
   end
@@ -671,6 +671,32 @@ local function write_file(name, text, no_dedent, append)
   file:close()
 end
 
+local function isCI()
+  local is_travis = nil ~= os.getenv('TRAVIS')
+  local is_appveyor = nil ~= os.getenv('APPVEYOR')
+  local is_quickbuild = nil ~= lfs.attributes('/usr/home/quickbuild')
+  return is_travis or is_appveyor or is_quickbuild
+end
+
+-- Gets the contents of $NVIM_LOG_FILE for printing to the build log.
+-- Also removes the file, if the current environment looks like CI.
+local function read_nvim_log()
+  local logfile = os.getenv('NVIM_LOG_FILE') or '.nvimlog'
+  local keep = isCI() and 999 or 10
+  local lines = read_file_list(logfile, -keep) or {}
+  local log = (('-'):rep(78)..'\n'
+    ..string.format('$NVIM_LOG_FILE: %s\n', logfile)
+    ..(#lines > 0 and '(last '..tostring(keep)..' lines)\n' or '(empty)\n'))
+  for _,line in ipairs(lines) do
+    log = log..line..'\n'
+  end
+  log = log..('-'):rep(78)..'\n'
+  if isCI() then
+    os.remove(logfile)
+  end
+  return log
+end
+
 local module = {
   REMOVE_THIS = REMOVE_THIS,
   argss_to_cmd = argss_to_cmd,
@@ -678,7 +704,6 @@ local module = {
   check_logs = check_logs,
   concat_tables = concat_tables,
   dedent = dedent,
-  deepcopy = deepcopy,
   dictdiff = dictdiff,
   eq = eq,
   expect_err = expect_err,
@@ -691,23 +716,27 @@ local module = {
   hasenv = hasenv,
   hexdump = hexdump,
   intchar2lua = intchar2lua,
+  isCI = isCI,
   map = map,
   matches = matches,
   mergedicts_copy = mergedicts_copy,
+  near = near,
   neq = neq,
   ok = ok,
   popen_r = popen_r,
   popen_w = popen_w,
   read_file = read_file,
+  read_file_list = read_file_list,
+  read_nvim_log = read_nvim_log,
   repeated_read_cmd = repeated_read_cmd,
-  sleep = sleep,
   shallowcopy = shallowcopy,
-  table_flatten = table_flatten,
+  sleep = sleep,
   tmpname = tmpname,
   uname = uname,
   updated = updated,
   which = which,
   write_file = write_file,
 }
+module = shared.tbl_extend('error', module, Paths, shared)
 
 return module

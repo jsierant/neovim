@@ -18,6 +18,15 @@ describe('assert function:', function()
     clear()
   end)
 
+  describe('assert_beeps', function()
+    it('works', function()
+      call('assert_beeps', 'normal h')
+      expected_empty()
+      call('assert_beeps', 'normal 0')
+      expected_errors({'command did not beep: normal 0'})
+    end)
+  end)
+
   -- assert_equal({expected}, {actual}, [, {msg}])
   describe('assert_equal', function()
     it('should not change v:errors when expected is equal to actual', function()
@@ -76,6 +85,11 @@ describe('assert function:', function()
       ]])
       eq('Vim(call):E724: unable to correctly dump variable with self-referencing container',
          exc_exec('call CheckAssert()'))
+    end)
+
+    it('can specify a message and get a message about what failed', function()
+      call('assert_equal', 'foo', 'bar', 'testing')
+      expected_errors({"testing: Expected 'foo' but got 'bar'"})
     end)
   end)
 
@@ -164,10 +178,10 @@ describe('assert function:', function()
         call assert_true('', 'file two')
       ]])
       expected_errors({
-        tmpname_one .. " line 1: 'equal assertion failed'",
-        tmpname_one .. " line 2: 'true  assertion failed'",
-        tmpname_one .. " line 3: 'false assertion failed'",
-        tmpname_two .. " line 1: 'file two'",
+        tmpname_one .. " line 1: equal assertion failed: Expected 1 but got 100",
+        tmpname_one .. " line 2: true  assertion failed: Expected False but got 'true'",
+        tmpname_one .. " line 3: false assertion failed: Expected True but got 'false'",
+        tmpname_two .. " line 1: file two: Expected True but got ''",
       })
     end)
 
@@ -198,7 +212,7 @@ describe('assert function:', function()
 
     it('should set v:errors to msg when given and match fails', function()
       call('assert_match', 'bar.*foo', 'foobar', 'wrong')
-      expected_errors({"'wrong'"})
+      expected_errors({"wrong: Pattern 'bar.*foo' does not match 'foobar'"})
     end)
   end)
 

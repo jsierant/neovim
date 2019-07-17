@@ -1,5 +1,5 @@
-dist: trusty
-sudo: false
+dist: xenial
+
 language: c
 
 env:
@@ -25,7 +25,7 @@ env:
                    -DBUSTED_OUTPUT_TYPE=nvim
                    -DDEPS_PREFIX=$DEPS_BUILD_DIR/usr
                    -DMIN_LOG_LEVEL=3"
-    - DEPS_CMAKE_FLAGS="-DDEPS_DOWNLOAD_DIR:PATH=$DEPS_DOWNLOAD_DIR"
+    - DEPS_CMAKE_FLAGS="-DDEPS_DOWNLOAD_DIR:PATH=$DEPS_DOWNLOAD_DIR -DUSE_BUNDLED_GPERF=OFF"
     # Additional CMake flags for 32-bit builds.
     - CMAKE_FLAGS_32BIT="-DCMAKE_SYSTEM_LIBRARY_PATH=/lib32:/usr/lib32:/usr/local/lib32
                          -DCMAKE_IGNORE_PATH=/lib:/usr/lib:/usr/local/lib
@@ -34,6 +34,7 @@ env:
     - ASAN_OPTIONS="detect_leaks=1:check_initialization_order=1:log_path=$LOG_DIR/asan"
     - TSAN_OPTIONS="log_path=$LOG_DIR/tsan"
     - UBSAN_OPTIONS="print_stacktrace=1 log_path=$LOG_DIR/ubsan"
+    - ASAN_SYMBOLIZE=asan_symbolize
     # Environment variables for Valgrind.
     - VALGRIND_LOG="$LOG_DIR/valgrind-%p.log"
     # If this file exists, the cache is valid (compile was successful).
@@ -45,45 +46,82 @@ env:
     - CCACHE_COMPRESS=1
     - CCACHE_SLOPPINESS=time_macros,file_macro
     - CCACHE_BASEDIR="$TRAVIS_BUILD_DIR"
+    # Default since 3.3, but Travis (Xenial) has 3.2.4; workaround (#10533).
+    - CCACHE_HASHDIR=1
+
+anchors:
+  envs: &common-job-env
+    # Do not fall back to cache for "master" for PR on "release" branch:
+    # adds the target branch to the cache key.
+    FOR_TRAVIS_CACHE=$TRAVIS_BRANCH
 
 jobs:
   include:
-    - stage: normal builds
+    - stage: baseline
+      name: clang-asan
       os: linux
-      compiler: clang
-      env: >
-        CLANG_SANITIZER=ASAN_UBSAN
-        CMAKE_FLAGS="$CMAKE_FLAGS -DPREFER_LUA=ON"
-      sudo: true
-    - os: linux
+      compiler: clang-4.0
+      # Use Lua so that ASAN can test our embedded Lua support. 8fec4d53d0f6
+      env:
+        - CLANG_SANITIZER=ASAN_UBSAN
+        - CMAKE_FLAGS="$CMAKE_FLAGS -DPREFER_LUA=ON"
+        - ASAN_SYMBOLIZE=asan_symbolize-4.0
+        - *common-job-env
+    - name: gcc-functionaltest-lua
+      os: linux
       compiler: gcc
-      env: >
-        FUNCTIONALTEST=functionaltest-lua
-        CMAKE_FLAGS="$CMAKE_FLAGS -DPREFER_LUA=ON"
-        DEPS_CMAKE_FLAGS="$DEPS_CMAKE_FLAGS -DUSE_BUNDLED_LUAJIT=OFF"
-    - os: linux
+      env:
+        - FUNCTIONALTEST=functionaltest-lua
+        - CMAKE_FLAGS="$CMAKE_FLAGS -DPREFER_LUA=ON"
+        - DEPS_CMAKE_FLAGS="$DEPS_CMAKE_FLAGS -DUSE_BUNDLED_LUAJIT=OFF"
+        - *common-job-env
+    - name: gcc-32bit
+      os: linux
       # Travis creates a cache per compiler. Set a different value here to
       # store 32-bit dependencies in a separate cache.
       compiler: gcc
-      env: BUILD_32BIT=ON
-    - os: osx
+      env:
+        - BUILD_32BIT=ON
+        # Minimum required CMake.
+        - CMAKE_URL=https://cmake.org/files/v2.8/cmake-2.8.12-Linux-i386.sh
+        - *common-job-env
+    - if: branch = master AND commit_message !~ /\[skip.lint\]/
+      name: lint
+      os: linux
+      env:
+        - CI_TARGET=lint
+        - *common-job-env
+
+    - stage: second stage
+      name: "macOS: clang"
+      os: osx
       compiler: clang
-      osx_image: xcode7.3  # macOS 10.11
-    - os: osx
+      osx_image: xcode10.2  # macOS 10.14
+      env:
+        - *common-job-env
+    - name: "macOS: gcc"
+      os: osx
       compiler: gcc
-      osx_image: xcode7.3  # macOS 10.11
-    - os: linux
-      env: CI_TARGET=lint
-    - stage: Flaky builds
+      osx_image: xcode10.2  # macOS 10.14
+      env:
+        - *common-job-env
+
+    - name: gcc-coverage
       os: linux
       compiler: gcc
-      env: GCOV=gcov CMAKE_FLAGS="$CMAKE_FLAGS -DUSE_GCOV=ON"
-    - os: linux
+      env:
+        - GCOV=gcov
+        - CMAKE_FLAGS="$CMAKE_FLAGS -DUSE_GCOV=ON"
+        - GCOV_ERROR_FILE="/tmp/libgcov-errors.log"
+        - *common-job-env
+    - name: clang-tsan
+      os: linux
       compiler: clang
-      env: CLANG_SANITIZER=TSAN
+      env:
+        - CLANG_SANITIZER=TSAN
+        - *common-job-env
   allow_failures:
-    - env: GCOV=gcov CMAKE_FLAGS="$CMAKE_FLAGS -DUSE_GCOV=ON"
-    - env: CLANG_SANITIZER=TSAN
+    - name: clang-tsan
   fast_finish: true
 
 before_install: ci/before_install.sh
@@ -95,29 +133,35 @@ before_cache:   ci/before_cache.sh
 addons:
   apt:
     packages:
+      - apport
       - autoconf
       - automake
-      - apport
       - build-essential
-      - clang
+      - clang-4.0
       - cmake
       - cscope
-      - g++-multilib
       - gcc-multilib
       - gdb
+      - gperf
       - language-pack-tr
       - libc6-dev-i386
-      - libtool
+      - libtool-bin
       - locales
       - ninja-build
       - pkg-config
       - unzip
       - valgrind
       - xclip
+  homebrew:
+    update: true
+    packages:
+      - ccache
+      - ninja
 
 branches:
-  except:
-    - nightly
+  only:
+    - master
+    - /^release-\d+\.\d+$/
 
 cache:
   apt: true

@@ -1,5 +1,10 @@
 " Functions shared by several tests.
 
+" Only load this script once.
+if exists('*WaitFor')
+  finish
+endif
+
 " {Nvim}
 " Filepath captured from output may be truncated, like this:
 "   /home/va...estdir/Xtest-tmpdir/nvimxbXN4i/10
@@ -128,32 +133,39 @@ func s:kill_server(cmd)
   endif
 endfunc
 
-" Wait for up to a second for "expr" to become true.
+" Wait for up to a second for "expr" to become true.  "expr" can be a
+" stringified expression to evaluate, or a funcref without arguments.
+"
+" A second argument can be used to specify a different timeout in msec.
+"
 " Return time slept in milliseconds.  With the +reltime feature this can be
 " more than the actual waiting time.  Without +reltime it can also be less.
-func WaitFor(expr)
+func WaitFor(expr, ...)
+  let timeout = get(a:000, 0, 1000)
   " using reltime() is more accurate, but not always available
   if has('reltime')
     let start = reltime()
   else
     let slept = 0
   endif
-  for i in range(100)
-    try
-      if eval(a:expr)
-	if has('reltime')
-	  return float2nr(reltimefloat(reltime(start)) * 1000)
-	endif
-	return slept
+  if type(a:expr) == v:t_func
+    let Test = a:expr
+  else
+    let Test = {-> eval(a:expr) }
+  endif
+  for i in range(timeout / 10)
+    if Test()
+      if has('reltime')
+	return float2nr(reltimefloat(reltime(start)) * 1000)
       endif
-    catch
-    endtry
+      return slept
+    endif
     if !has('reltime')
       let slept += 10
     endif
     sleep 10m
   endfor
-  return 1000
+  throw 'WaitFor() timed out after ' . timeout . ' msec'
 endfunc
 
 " Wait for up to a given milliseconds.
@@ -185,12 +197,18 @@ func s:feedkeys(timer)
 endfunc
 
 " Get the command to run Vim, with -u NONE and --headless arguments.
+" If there is an argument use it instead of "NONE".
 " Returns an empty string on error.
-func GetVimCommand()
+func GetVimCommand(...)
+  if a:0 == 0
+    let name = 'NONE'
+  else
+    let name = a:1
+  endif
   let cmd = v:progpath
-  let cmd = substitute(cmd, '-u \f\+', '-u NONE', '')
-  if cmd !~ '-u NONE'
-    let cmd = cmd . ' -u NONE'
+  let cmd = substitute(cmd, '-u \f\+', '-u ' . name, '')
+  if cmd !~ '-u '. name
+    let cmd = cmd . ' -u ' . name
   endif
   let cmd .= ' --headless -i NONE'
   let cmd = substitute(cmd, 'VIMRUNTIME=.*VIMRUNTIME;', '', '')
@@ -231,4 +249,19 @@ func RunVimPiped(before, after, arguments, pipecmd)
     call delete('Xafter.vim')
   endif
   return 1
+endfunc
+
+" Get line "lnum" as displayed on the screen.
+" Trailing white space is trimmed.
+func! Screenline(lnum)
+  let chars = []
+  for c in range(1, winwidth(0))
+    call add(chars, nr2char(screenchar(a:lnum, c)))
+  endfor
+  let line = join(chars, '')
+  return matchstr(line, '^.\{-}\ze\s*$')
+endfunc
+
+func CanRunGui()
+  return has('gui') && ($DISPLAY != "" || has('gui_running'))
 endfunc

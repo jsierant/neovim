@@ -142,6 +142,19 @@ function Test_CompleteDoneDict()
   au! CompleteDone
 endfunc
 
+func Test_CompleteDone_undo()
+  au CompleteDone * call append(0, "prepend1")
+  new
+  call setline(1, ["line1", "line2"])
+  call feedkeys("Go\<C-X>\<C-N>\<CR>\<ESC>", "tx")
+  call assert_equal(["prepend1", "line1", "line2", "line1", ""],
+              \     getline(1, '$'))
+  undo
+  call assert_equal(["line1", "line2"], getline(1, '$'))
+  bwipe!
+  au! CompleteDone
+endfunc
+
 function! s:CompleteDone_CompleteFuncDictNoUserData( findstart, base )
   if a:findstart
     return 0
@@ -216,4 +229,34 @@ function Test_CompleteDoneList()
 
   let s:called_completedone = 0
   au! CompleteDone
+endfunc
+
+func Test_omni_dash()
+  func Omni(findstart, base)
+    if a:findstart
+        return 5
+    else
+        echom a:base
+	return ['-help', '-v']
+    endif
+  endfunc
+  set omnifunc=Omni
+  new
+  exe "normal Gofind -\<C-x>\<C-o>"
+  call assert_equal("\n-\nmatch 1 of 2", execute(':2mess'))
+
+  bwipe!
+  delfunc Omni
+  set omnifunc=
+endfunc
+
+" Check that when using feedkeys() typeahead does not interrupt searching for
+" completions.
+func Test_compl_feedkeys()
+  new
+  set completeopt=menuone,noselect
+  call feedkeys("ajump ju\<C-X>\<C-N>\<C-P>\<ESC>", "tx")
+  call assert_equal("jump jump", getline(1))
+  bwipe!
+  set completeopt&
 endfunc

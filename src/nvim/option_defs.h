@@ -74,13 +74,14 @@
 #define FO_MBYTE_JOIN   'M'     /* no space before/after multi-byte char */
 #define FO_MBYTE_JOIN2  'B'     /* no space between multi-byte chars */
 #define FO_ONE_LETTER   '1'
-#define FO_WHITE_PAR    'w'     /* trailing white space continues paragr. */
-#define FO_AUTO         'a'     /* automatic formatting */
-#define FO_REMOVE_COMS  'j'     /* remove comment leaders when joining lines */
+#define FO_WHITE_PAR    'w'     // trailing white space continues paragr.
+#define FO_AUTO         'a'     // automatic formatting
+#define FO_REMOVE_COMS  'j'     // remove comment leaders when joining lines
+#define FO_PERIOD_ABBR  'p'     // don't break a single space after a period
 
 #define DFLT_FO_VI      "vt"
 #define DFLT_FO_VIM     "tcqj"
-#define FO_ALL          "tcroq2vlb1mMBn,awj"    /* for do_set() */
+#define FO_ALL          "tcroq2vlb1mMBn,awjp"   // for do_set()
 
 // characters for the p_cpo option:
 #define CPO_ALTREAD     'a'     // ":read" sets alternate file name
@@ -172,43 +173,37 @@ enum {
   SHM_COMPLETIONMENU = 'c',  ///< Completion menu messages.
   SHM_RECORDING      = 'q',  ///< Short recording message.
   SHM_FILEINFO       = 'F',  ///< No file info messages.
+  SHM_SEARCHCOUNT    = 'S',  ///< Search sats: '[1/10]'
 };
 /// Represented by 'a' flag.
 #define SHM_ALL_ABBREVIATIONS ((char_u[]) { \
   SHM_RO, SHM_MOD, SHM_FILE, SHM_LAST, SHM_TEXT, SHM_LINES, SHM_NEW, SHM_WRI, \
   0, \
 })
-/// All possible flags for 'shm'.
-#define SHM_ALL ((char_u[]) { \
-  SHM_RO, SHM_MOD, SHM_FILE, SHM_LAST, SHM_TEXT, SHM_LINES, SHM_NEW, SHM_WRI, \
-  SHM_ABBREVIATIONS, SHM_WRITE, SHM_TRUNC, SHM_TRUNCALL, SHM_OVER, \
-  SHM_OVERALL, SHM_SEARCH, SHM_ATTENTION, SHM_INTRO, SHM_COMPLETIONMENU, \
-  SHM_RECORDING, SHM_FILEINFO, \
-  0, \
-})
 
-/* characters for p_go: */
-#define GO_ASEL         'a'             /* autoselect */
-#define GO_ASELML       'A'             /* autoselect modeless selection */
-#define GO_BOT          'b'             /* use bottom scrollbar */
-#define GO_CONDIALOG    'c'             /* use console dialog */
-#define GO_TABLINE      'e'             /* may show tabline */
-#define GO_FORG         'f'             /* start GUI in foreground */
-#define GO_GREY         'g'             /* use grey menu items */
-#define GO_HORSCROLL    'h'             /* flexible horizontal scrolling */
-#define GO_ICON         'i'             /* use Vim icon */
-#define GO_LEFT         'l'             /* use left scrollbar */
-#define GO_VLEFT        'L'             /* left scrollbar with vert split */
-#define GO_MENUS        'm'             /* use menu bar */
-#define GO_NOSYSMENU    'M'             /* don't source system menu */
-#define GO_POINTER      'p'             /* pointer enter/leave callbacks */
-#define GO_ASELPLUS     'P'             /* autoselectPlus */
-#define GO_RIGHT        'r'             /* use right scrollbar */
-#define GO_VRIGHT       'R'             /* right scrollbar with vert split */
-#define GO_TOOLBAR      'T'             /* add toolbar */
-#define GO_FOOTER       'F'             /* add footer */
-#define GO_VERTICAL     'v'             /* arrange dialog buttons vertically */
-#define GO_ALL          "aAbcefFghilmMprTv" /* all possible flags for 'go' */
+// characters for p_go:
+#define GO_ASEL         'a'             // autoselect
+#define GO_ASELML       'A'             // autoselect modeless selection
+#define GO_BOT          'b'             // use bottom scrollbar
+#define GO_CONDIALOG    'c'             // use console dialog
+#define GO_TABLINE      'e'             // may show tabline
+#define GO_FORG         'f'             // start GUI in foreground
+#define GO_GREY         'g'             // use grey menu items
+#define GO_HORSCROLL    'h'             // flexible horizontal scrolling
+#define GO_ICON         'i'             // use Vim icon
+#define GO_LEFT         'l'             // use left scrollbar
+#define GO_VLEFT        'L'             // left scrollbar with vert split
+#define GO_MENUS        'm'             // use menu bar
+#define GO_NOSYSMENU    'M'             // don't source system menu
+#define GO_POINTER      'p'             // pointer enter/leave callbacks
+#define GO_ASELPLUS     'P'             // autoselectPlus
+#define GO_RIGHT        'r'             // use right scrollbar
+#define GO_VRIGHT       'R'             // right scrollbar with vert split
+#define GO_TOOLBAR      'T'             // add toolbar
+#define GO_FOOTER       'F'             // add footer
+#define GO_VERTICAL     'v'             // arrange dialog buttons vertically
+#define GO_KEEPWINSIZE  'k'             // keep GUI window size
+#define GO_ALL          "aAbcefFghilmMprTvk"  // all possible flags for 'go'
 
 /* flags for 'comments' option */
 #define COM_NEST        'n'             /* comments strings nest */
@@ -314,9 +309,10 @@ static char *(p_bkc_values[]) =
 # define BKC_NO                 0x004
 # define BKC_BREAKSYMLINK       0x008
 # define BKC_BREAKHARDLINK      0x010
-EXTERN char_u   *p_bdir;        /* 'backupdir' */
-EXTERN char_u   *p_bex;         /* 'backupext' */
-EXTERN char_u   *p_bo;          // 'belloff'
+EXTERN char_u *p_bdir;            // 'backupdir'
+EXTERN char_u *p_bex;             // 'backupext'
+EXTERN char_u *p_bo;              // 'belloff'
+EXTERN char breakat_flags[256];   // which characters are in 'breakat'
 EXTERN unsigned bo_flags;
 # ifdef IN_OPTION_C
 static char *(p_bo_values[]) = {"all", "backspace", "cursor", "complete",
@@ -374,6 +370,7 @@ EXTERN int p_confirm;           // 'confirm'
 EXTERN int p_cp;                // 'compatible'
 EXTERN char_u   *p_cot;         // 'completeopt'
 EXTERN long p_ph;               // 'pumheight'
+EXTERN long p_pb;               // 'pumblend'
 EXTERN char_u   *p_cpo;         // 'cpoptions'
 EXTERN char_u   *p_csprg;       // 'cscopeprg'
 EXTERN int p_csre;              // 'cscoperelative'
@@ -462,8 +459,6 @@ EXTERN int p_hls;               // 'hlsearch'
 EXTERN long p_hi;               // 'history'
 EXTERN int p_hkmap;             // 'hkmap'
 EXTERN int p_hkmapp;            // 'hkmapp'
-EXTERN int p_fkmap;             // 'fkmap'
-EXTERN int p_altkeymap;         // 'altkeymap'
 EXTERN int p_arshape;           // 'arabicshape'
 EXTERN int p_icon;              // 'icon'
 EXTERN char_u   *p_iconstring;  // 'iconstring'
@@ -485,7 +480,6 @@ EXTERN long     *p_linespace;   // 'linespace'
 EXTERN char_u   *p_lispwords;   // 'lispwords'
 EXTERN long p_ls;               // 'laststatus'
 EXTERN long p_stal;             // 'showtabline'
-EXTERN char_u   *p_lcs;         // 'listchars'
 
 EXTERN int p_lz;                // 'lazyredraw'
 EXTERN int p_lpl;               // 'loadplugins'
@@ -502,6 +496,7 @@ EXTERN long p_mmd;              // 'maxmapdepth'
 EXTERN long p_mmp;              // 'maxmempattern'
 EXTERN long p_mis;              // 'menuitems'
 EXTERN char_u   *p_msm;         // 'mkspellmem'
+EXTERN long p_mle;              // 'modelineexpr'
 EXTERN long p_mls;              // 'modelines'
 EXTERN char_u   *p_mouse;       // 'mouse'
 EXTERN char_u   *p_mousem;      // 'mousemodel'
@@ -515,6 +510,14 @@ EXTERN char_u   *p_pex;         // 'patchexpr'
 EXTERN char_u   *p_pm;          // 'patchmode'
 EXTERN char_u   *p_path;        // 'path'
 EXTERN char_u   *p_cdpath;      // 'cdpath'
+EXTERN long p_pyx;              // 'pyxversion'
+EXTERN char_u *p_rdb;           // 'redrawdebug'
+EXTERN unsigned rdb_flags;
+# ifdef IN_OPTION_C
+static char *(p_rdb_values[]) = { "compositor", NULL };
+# endif
+# define RDB_COMPOSITOR         0x001
+
 EXTERN long p_rdt;              // 'redrawtime'
 EXTERN int p_remap;             // 'remap'
 EXTERN long p_re;               // 'regexpengine'
@@ -636,8 +639,8 @@ EXTERN long p_ul;               ///< 'undolevels'
 EXTERN long p_ur;               ///< 'undoreload'
 EXTERN long p_uc;               ///< 'updatecount'
 EXTERN long p_ut;               ///< 'updatetime'
-EXTERN char_u *p_fcs;           ///< 'fillchar'
 EXTERN char_u *p_shada;         ///< 'shada'
+EXTERN char *p_shadafile;       ///< 'shadafile'
 EXTERN char_u *p_vdir;          ///< 'viewdir'
 EXTERN char_u *p_vop;           ///< 'viewoptions'
 EXTERN unsigned vop_flags;      ///< uses SSOP_ flags
@@ -659,6 +662,12 @@ extern char_u   *p_vfile;       /* 'verbosefile' */
 #endif
 EXTERN int p_warn;              // 'warn'
 EXTERN char_u   *p_wop;         // 'wildoptions'
+EXTERN unsigned wop_flags;
+# ifdef IN_OPTION_C
+static char *(p_wop_values[]) =  { "tagfile", "pum", NULL };
+#endif
+#define WOP_TAGFILE             0x01
+#define WOP_PUM                 0x02
 EXTERN long p_window;           // 'window'
 EXTERN char_u   *p_wak;         // 'winaltkeys'
 EXTERN char_u   *p_wig;         // 'wildignore'
@@ -812,6 +821,9 @@ enum {
   , WV_WRAP
   , WV_SCL
   , WV_WINHL
+  , WV_FCS
+  , WV_LCS
+  , WV_WINBL
   , WV_COUNT        // must be the last one
 };
 

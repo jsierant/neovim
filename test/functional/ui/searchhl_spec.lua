@@ -1,6 +1,7 @@
 local helpers = require('test.functional.helpers')(after_each)
 local Screen = require('test.functional.ui.screen')
 local clear, feed, insert = helpers.clear, helpers.feed, helpers.insert
+local command = helpers.command
 local feed_command = helpers.feed_command
 local eq = helpers.eq
 local eval = helpers.eval
@@ -93,6 +94,59 @@ describe('search highlighting', function()
     ]])
   end)
 
+  it('highlights after EOL', function()
+    insert("\n\n\n\n\n\n")
+
+    feed("gg/^<cr>")
+    screen:expect([[
+      {2: }                                       |
+      {2:^ }                                       |
+      {2: }                                       |
+      {2: }                                       |
+      {2: }                                       |
+      {2: }                                       |
+      /^                                      |
+    ]])
+
+    -- Test that highlights are preserved after moving the cursor.
+    feed("j")
+    screen:expect([[
+      {2: }                                       |
+      {2: }                                       |
+      {2:^ }                                       |
+      {2: }                                       |
+      {2: }                                       |
+      {2: }                                       |
+      /^                                      |
+    ]])
+
+    -- Repeat the test in rightleft mode.
+    command("nohlsearch")
+    command("set rightleft")
+    feed("gg/^<cr>")
+
+    screen:expect([[
+                                             {2: }|
+                                             {2:^ }|
+                                             {2: }|
+                                             {2: }|
+                                             {2: }|
+                                             {2: }|
+      ^/                                      |
+    ]])
+
+    feed("j")
+    screen:expect([[
+                                             {2: }|
+                                             {2: }|
+                                             {2:^ }|
+                                             {2: }|
+                                             {2: }|
+                                             {2: }|
+      ^/                                      |
+    ]])
+  end)
+
   it('is preserved during :terminal activity', function()
     if iswin() then
       feed([[:terminal for /L \%I in (1,1,5000) do @(echo xxx & echo xxx & echo xxx)<cr>]])
@@ -109,12 +163,14 @@ describe('search highlighting', function()
     ]])
     feed('/foo')
     sleep(50)  -- Allow some terminal activity.
+    -- NB: in earlier versions terminal output was redrawn during cmdline mode.
+    -- For now just assert that the screens remain unchanged.
     screen:expect([[
-        {3:foo} bar baz       {3:│}xxx                |
-        bar baz {2:foo}       {3:│}xxx                |
-        bar {2:foo} baz       {3:│}xxx                |
-                          {3:│}xxx                |
-      {1:~                   }{3:│}xxx                |
+        {3:foo} bar baz       {3:│}                   |
+        bar baz {2:foo}       {3:│}                   |
+        bar {2:foo} baz       {3:│}                   |
+                          {3:│}                   |
+      {1:~                   }{3:│}                   |
       {5:[No Name] [+]        }{3:term               }|
       /foo^                                    |
     ]], { [1] = {bold = true, foreground = Screen.colors.Blue1},
@@ -270,7 +326,17 @@ describe('search highlighting', function()
     ]])
 
     -- same, for C-t
-    feed('<ESC>/<C-t>')
+    feed('<ESC>')
+    screen:expect([[
+        the first line                        |
+        in a ^little file                      |
+                                              |
+      {1:~                                       }|
+      {1:~                                       }|
+      {1:~                                       }|
+                                              |
+    ]])
+    feed('/<C-t>')
     screen:expect([[
         the first line                        |
         in a little file                      |

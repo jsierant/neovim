@@ -1,8 +1,7 @@
 -- TUI acceptance tests.
 -- Uses :terminal as a way to send keys and assert screen state.
-local global_helpers = require('test.helpers')
-local uname = global_helpers.uname
 local helpers = require('test.functional.helpers')(after_each)
+local uname = helpers.uname
 local thelpers = require('test.functional.terminal.helpers')
 local Screen = require('test.functional.ui.screen')
 local eq = helpers.eq
@@ -17,11 +16,10 @@ local nvim_prog = helpers.nvim_prog
 local nvim_set = helpers.nvim_set
 local ok = helpers.ok
 local read_file = helpers.read_file
-local wait = helpers.wait
 
 if helpers.pending_win32(pending) then return end
 
-describe('tui', function()
+describe('TUI', function()
   local screen
 
   before_each(function()
@@ -135,15 +133,17 @@ describe('tui', function()
     feed_data('\022\007') -- ctrl+g
     feed_data('\022\022') -- ctrl+v
     feed_data('\022\013') -- ctrl+m
+    local attrs = screen:get_default_attr_ids()
+    attrs[11] = {foreground = 81}
     screen:expect([[
-    {9:^G^V^M}{1: }                                           |
+    {11:^G^V^M}{1: }                                           |
     {4:~                                                 }|
     {4:~                                                 }|
     {4:~                                                 }|
     {5:[No Name] [+]                                     }|
     {3:-- INSERT --}                                      |
     {3:-- TERMINAL --}                                    |
-    ]])
+    ]], attrs)
   end)
 
   it('automatically sends <Paste> for bracketed paste sequences', function()
@@ -182,6 +182,21 @@ describe('tui', function()
     ]])
   end)
 
+  it('handles pasting a specific amount of text', function()
+    -- Need extra time for this test, specially in ASAN.
+    screen.timeout = 60000
+    feed_data('i\027[200~'..string.rep('z', 64)..'\027[201~')
+    screen:expect([[
+      zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz|
+      zzzzzzzzzzzzzz{1: }                                   |
+      {4:~                                                 }|
+      {4:~                                                 }|
+      {5:[No Name] [+]                                     }|
+      {3:-- INSERT --}                                      |
+      {3:-- TERMINAL --}                                    |
+    ]])
+  end)
+
   it('can handle arbitrarily long bursts of input', function()
     -- Need extra time for this test, specially in ASAN.
     screen.timeout = 60000
@@ -206,14 +221,14 @@ describe('tui', function()
     screen:set_option('rgb', true)
     screen:set_default_attr_ids({
       [1] = {reverse = true},
-      [2] = {foreground = 13, special = Screen.colors.Grey0},
-      [3] = {special = Screen.colors.Grey0, bold = true, reverse = true},
+      [2] = {foreground = 13},
+      [3] = {bold = true, reverse = true},
       [4] = {bold = true},
-      [5] = {special = Screen.colors.Grey0, reverse = true, foreground = 4},
-      [6] = {foreground = 4, special = Screen.colors.Grey0},
-      [7] = {special = Screen.colors.Grey0, reverse = true, foreground = Screen.colors.SeaGreen4},
-      [8] = {foreground = Screen.colors.SeaGreen4, special = Screen.colors.Grey0},
-      [9] = {special = Screen.colors.Grey0, bold = true, foreground = Screen.colors.Blue1},
+      [5] = {reverse = true, foreground = 4},
+      [6] = {foreground = 4},
+      [7] = {reverse = true, foreground = Screen.colors.SeaGreen4},
+      [8] = {foreground = Screen.colors.SeaGreen4},
+      [9] = {bold = true, foreground = Screen.colors.Blue1},
     })
 
     feed_data(':hi SpecialKey ctermfg=3 guifg=SeaGreen\n')
@@ -253,17 +268,29 @@ describe('tui', function()
       {4:-- TERMINAL --}                                    |
     ]])
   end)
+
+  it('is included in nvim_list_uis()', function()
+    feed_data(':echo map(nvim_list_uis(), {k,v -> sort(items(filter(v, {k,v -> k[:3] !=# "ext_" })))})\013')
+    screen:expect([=[
+                                                        |
+      {4:~                                                 }|
+      {5:                                                  }|
+      [[['height', 6], ['override', v:false], ['rgb', v:|
+      false], ['width', 50]]]                           |
+      {10:Press ENTER or type command to continue}{1: }          |
+      {3:-- TERMINAL --}                                    |
+    ]=])
+  end)
 end)
 
-describe('tui with non-tty file descriptors', function()
-  before_each(helpers.clear)
-
+describe('TUI', function()
+  before_each(clear)
   after_each(function()
-    os.remove('testF') -- ensure test file is removed
+    os.remove('testF')
   end)
 
-  it('can handle pipes as stdout and stderr', function()
-    local screen = thelpers.screen_setup(0, '"'..helpers.nvim_prog
+  it('with non-tty (pipe) stdout/stderr', function()
+    local screen = thelpers.screen_setup(0, '"'..nvim_prog
       ..' -u NONE -i NONE --cmd \'set noswapfile noshowcmd noruler\' --cmd \'normal iabc\' > /dev/null 2>&1 && cat testF && rm testF"')
     feed_data(':w testF\n:q\n')
     screen:expect([[
@@ -276,14 +303,30 @@ describe('tui with non-tty file descriptors', function()
       {3:-- TERMINAL --}                                    |
     ]])
   end)
+
+  it('<C-h> #10134', function()
+    local screen = thelpers.screen_setup(0, '["'..nvim_prog
+      ..[[", "-u", "NONE", "-i", "NONE", "--cmd", "set noruler", "--cmd", ':nnoremap <C-h> :echomsg "\<C-h\>"<CR>']]..']')
+
+    command([[call chansend(b:terminal_job_id, "\<C-h>")]])
+    screen:expect([[
+      {1: }                                                 |
+      {4:~                                                 }|
+      {4:~                                                 }|
+      {4:~                                                 }|
+      {5:[No Name]                                         }|
+      <C-h>                                             |
+      {3:-- TERMINAL --}                                    |
+    ]])
+  end)
 end)
 
-describe('tui FocusGained/FocusLost', function()
+describe('TUI FocusGained/FocusLost', function()
   local screen
 
   before_each(function()
     helpers.clear()
-    screen = thelpers.screen_setup(0, '["'..helpers.nvim_prog
+    screen = thelpers.screen_setup(0, '["'..nvim_prog
       ..'", "-u", "NONE", "-i", "NONE", "--cmd", "set noswapfile noshowcmd noruler"]')
     feed_data(":autocmd FocusGained * echo 'gained'\n")
     feed_data(":autocmd FocusLost * echo 'lost'\n")
@@ -358,7 +401,7 @@ describe('tui FocusGained/FocusLost', function()
       {3:-- TERMINAL --}                                    |
     ]])
     feed_data('\027[O')
-    screen:expect([[
+    screen:expect{grid=[[
                                                         |
       {4:~                                                 }|
       {4:~                                                 }|
@@ -366,7 +409,7 @@ describe('tui FocusGained/FocusLost', function()
       {5:[No Name]                                         }|
       :{1: }                                                |
       {3:-- TERMINAL --}                                    |
-    ]])
+    ]], unchanged=true}
   end)
 
   it('in cmdline-mode', function()
@@ -387,7 +430,7 @@ describe('tui FocusGained/FocusLost', function()
       -- Exit cmdline-mode. Redraws from timers/events are blocked during
       -- cmdline-mode, so the buffer won't be updated until we exit cmdline-mode.
       feed_data('\n')
-      screen:expect('lost'..(' '):rep(46)..'\ngained', nil, nil, nil, true)
+      screen:expect{any='lost'..(' '):rep(46)..'|\ngained'}
     end)
   end)
 
@@ -445,7 +488,7 @@ end)
 
 -- These tests require `thelpers` because --headless/--embed
 -- does not initialize the TUI.
-describe("tui 't_Co' (terminal colors)", function()
+describe("TUI 't_Co' (terminal colors)", function()
   local screen
   local is_freebsd = (string.lower(uname()) == 'freebsd')
 
@@ -460,14 +503,24 @@ describe("tui 't_Co' (terminal colors)", function()
       nvim_prog,
       nvim_set))
 
-    feed_data(":echo &t_Co\n")
-    wait()
     local tline
     if maxcolors == 8 or maxcolors == 16 then
       tline = "~                                                 "
     else
       tline = "{4:~                                                 }"
     end
+
+    screen:expect(string.format([[
+      {1: }                                                 |
+      %s|
+      %s|
+      %s|
+      %s|
+                                                        |
+      {3:-- TERMINAL --}                                    |
+    ]], tline, tline, tline, tline))
+
+    feed_data(":echo &t_Co\n")
     screen:expect(string.format([[
       {1: }                                                 |
       %s|
@@ -707,7 +760,7 @@ end)
 
 -- These tests require `thelpers` because --headless/--embed
 -- does not initialize the TUI.
-describe("tui 'term' option", function()
+describe("TUI 'term' option", function()
   local screen
   local is_bsd = not not string.find(string.lower(uname()), 'bsd')
   local is_macos = not not string.find(string.lower(uname()), 'darwin')
@@ -727,7 +780,7 @@ describe("tui 'term' option", function()
     screen.timeout = 250  -- We want screen:expect() to fail quickly.
     retry(nil, 2 * full_timeout, function()  -- Wait for TUI thread to set 'term'.
       feed_data(":echo 'term='.(&term)\n")
-      screen:expect('term='..term_expected, nil, nil, nil, true)
+      screen:expect{any='term='..term_expected}
     end)
   end
 
@@ -748,11 +801,18 @@ describe("tui 'term' option", function()
     end
   end)
 
+  it('builtin terms', function()
+    -- These non-standard terminfos are always builtin.
+    assert_term('win32con', 'builtin_win32con')
+    assert_term('conemu', 'builtin_conemu')
+    assert_term('vtpcon', 'builtin_vtpcon')
+  end)
+
 end)
 
 -- These tests require `thelpers` because --headless/--embed
 -- does not initialize the TUI.
-describe("tui", function()
+describe("TUI", function()
   local screen
   local logfile = 'Xtest_tui_verbose_log'
   after_each(function()
@@ -794,4 +854,127 @@ describe("tui", function()
     end)
   end)
 
+end)
+
+describe('TUI background color', function()
+  local screen
+
+  before_each(function()
+    clear()
+    screen = thelpers.screen_setup(0, '["'..nvim_prog
+      ..'", "-u", "NONE", "-i", "NONE", "--cmd", "set noswapfile"]')
+  end)
+
+  it("triggers OptionSet event on terminal-response", function()
+    feed_data('\027:autocmd OptionSet background echo "did OptionSet, yay!"\n')
+
+    -- Wait for the child Nvim to register the OptionSet handler.
+    feed_data('\027:autocmd OptionSet\n')
+    screen:expect({any='--- Autocommands ---'})
+
+    feed_data('\012')  -- CTRL-L: clear the screen
+    screen:expect([[
+      {1: }                                                 |
+      {4:~                                                 }|
+      {4:~                                                 }|
+      {4:~                                                 }|
+      {5:[No Name]                       0,0-1          All}|
+                                                        |
+      {3:-- TERMINAL --}                                    |
+    ]])
+    feed_data('\027]11;rgb:ffff/ffff/ffff\007')
+    screen:expect{any='did OptionSet, yay!'}
+  end)
+
+  it("handles deferred background color", function()
+    local last_bg = 'dark'
+    local function wait_for_bg(bg)
+      -- Retry until the terminal response is handled.
+      retry(100, nil, function()
+        feed_data(':echo &background\n')
+        screen:expect({
+          timeout=40,
+          grid=string.format([[
+            {1: }                                                 |
+            {4:~                                                 }|
+            {4:~                                                 }|
+            {4:~                                                 }|
+            {5:[No Name]                       0,0-1          All}|
+            %-5s                                             |
+            {3:-- TERMINAL --}                                    |
+          ]], bg)
+        })
+      end)
+      last_bg = bg
+    end
+
+    local function assert_bg(colorspace, color, bg)
+      -- Ensure the opposite of the expected bg is active.
+      local other_bg = (bg == 'dark' and 'light' or 'dark')
+      if last_bg ~= other_bg then
+        feed_data(other_bg == 'light' and '\027]11;rgb:f/f/f\007'
+                                      or  '\027]11;rgb:0/0/0\007')
+        wait_for_bg(other_bg)
+      end
+
+      feed_data('\027]11;'..colorspace..':'..color..'\007')
+      wait_for_bg(bg)
+    end
+
+    assert_bg('rgb', '0000/0000/0000', 'dark')
+    assert_bg('rgb', 'ffff/ffff/ffff', 'light')
+    assert_bg('rgb', '000/000/000', 'dark')
+    assert_bg('rgb', 'fff/fff/fff', 'light')
+    assert_bg('rgb', '00/00/00', 'dark')
+    assert_bg('rgb', 'ff/ff/ff', 'light')
+    assert_bg('rgb', '0/0/0', 'dark')
+    assert_bg('rgb', 'f/f/f', 'light')
+
+    assert_bg('rgb', 'f/0/0', 'dark')
+    assert_bg('rgb', '0/f/0', 'light')
+    assert_bg('rgb', '0/0/f', 'dark')
+
+    assert_bg('rgb', '1/1/1', 'dark')
+    assert_bg('rgb', '2/2/2', 'dark')
+    assert_bg('rgb', '3/3/3', 'dark')
+    assert_bg('rgb', '4/4/4', 'dark')
+    assert_bg('rgb', '5/5/5', 'dark')
+    assert_bg('rgb', '6/6/6', 'dark')
+    assert_bg('rgb', '7/7/7', 'dark')
+    assert_bg('rgb', '8/8/8', 'light')
+    assert_bg('rgb', '9/9/9', 'light')
+    assert_bg('rgb', 'a/a/a', 'light')
+    assert_bg('rgb', 'b/b/b', 'light')
+    assert_bg('rgb', 'c/c/c', 'light')
+    assert_bg('rgb', 'd/d/d', 'light')
+    assert_bg('rgb', 'e/e/e', 'light')
+
+    assert_bg('rgb', '0/e/0', 'light')
+    assert_bg('rgb', '0/d/0', 'light')
+    assert_bg('rgb', '0/c/0', 'dark')
+    assert_bg('rgb', '0/b/0', 'dark')
+
+    assert_bg('rgb', 'f/0/f', 'dark')
+    assert_bg('rgb', 'f/1/f', 'dark')
+    assert_bg('rgb', 'f/2/f', 'dark')
+    assert_bg('rgb', 'f/3/f', 'light')
+    assert_bg('rgb', 'f/4/f', 'light')
+
+    assert_bg('rgba', '0000/0000/0000/0000', 'dark')
+    assert_bg('rgba', '0000/0000/0000/ffff', 'dark')
+    assert_bg('rgba', 'ffff/ffff/ffff/0000', 'light')
+    assert_bg('rgba', 'ffff/ffff/ffff/ffff', 'light')
+    assert_bg('rgba', '000/000/000/000', 'dark')
+    assert_bg('rgba', '000/000/000/fff', 'dark')
+    assert_bg('rgba', 'fff/fff/fff/000', 'light')
+    assert_bg('rgba', 'fff/fff/fff/fff', 'light')
+    assert_bg('rgba', '00/00/00/00', 'dark')
+    assert_bg('rgba', '00/00/00/ff', 'dark')
+    assert_bg('rgba', 'ff/ff/ff/00', 'light')
+    assert_bg('rgba', 'ff/ff/ff/ff', 'light')
+    assert_bg('rgba', '0/0/0/0', 'dark')
+    assert_bg('rgba', '0/0/0/f', 'dark')
+    assert_bg('rgba', 'f/f/f/0', 'light')
+    assert_bg('rgba', 'f/f/f/f', 'light')
+  end)
 end)

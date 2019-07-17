@@ -659,6 +659,7 @@ describe('put command', function()
   end)
 
   describe('put after the line with virtualedit', function()
+    -- luacheck: ignore 621
     local test_string = [[
     Line of words 1  test_stringx"
     	Line of words 2]]
@@ -855,6 +856,7 @@ describe('put command', function()
   end)
 
   describe('. register special tests', function()
+    -- luacheck: ignore 621
     before_each(reset)
     it('applies control character actions', function()
       feed('i<C-t><esc>u')
@@ -874,20 +876,23 @@ describe('put command', function()
     local function bell_test(actions, should_ring)
       local screen = Screen.new()
       screen:attach()
+      if should_ring then
+        -- check bell is not set by nvim before the action
+        screen:sleep(50)
+      end
       helpers.ok(not screen.bell and not screen.visualbell)
       actions()
-      helpers.wait()
-      screen:wait(function()
+      screen:expect{condition=function()
         if should_ring then
           if not screen.bell and not screen.visualbell then
-            return 'Bell was not rung after action'
+            error('Bell was not rung after action')
           end
         else
           if screen.bell or screen.visualbell then
-            return 'Bell was rung after action'
+            error('Bell was rung after action')
           end
         end
-      end)
+      end, unchanged=(not should_ring)}
       screen:detach()
     end
 
