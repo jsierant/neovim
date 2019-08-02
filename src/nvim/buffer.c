@@ -3366,7 +3366,6 @@ int build_stl_str_hl(
   char_u      *usefmt = fmt;
   const int save_must_redraw = must_redraw;
   const int save_redr_type = curwin->w_redr_type;
-  const int save_highlight_shcnaged = need_highlight_changed;
 
   // When the format starts with "%!" then evaluate it as an expression and
   // use the result as the actual format string.
@@ -4430,12 +4429,12 @@ int build_stl_str_hl(
     cur_tab_rec->def.func = NULL;
   }
 
-  // We do not want redrawing a stausline, ruler, title, etc. to trigger
-  // another redraw, it may cause an endless loop.  This happens when a
-  // statusline changes a highlight group.
-  must_redraw = save_must_redraw;
-  curwin->w_redr_type = save_redr_type;
-  need_highlight_changed = save_highlight_shcnaged;
+  // When inside update_screen we do not want redrawing a stausline, ruler,
+  // title, etc. to trigger another redraw, it may cause an endless loop.
+  if (updating_screen) {
+    must_redraw = save_must_redraw;
+    curwin->w_redr_type = save_redr_type;
+  }
 
   return width;
 }
@@ -5172,18 +5171,21 @@ chk_modeline(
 
 // Return true if "buf" is a help buffer.
 bool bt_help(const buf_T *const buf)
+  FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT
 {
   return buf != NULL && buf->b_help;
 }
 
 // Return true if "buf" is the quickfix buffer.
 bool bt_quickfix(const buf_T *const buf)
+  FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT
 {
   return buf != NULL && buf->b_p_bt[0] == 'q';
 }
 
 // Return true if "buf" is a terminal buffer.
 bool bt_terminal(const buf_T *const buf)
+  FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT
 {
   return buf != NULL && buf->b_p_bt[0] == 't';
 }
@@ -5191,6 +5193,7 @@ bool bt_terminal(const buf_T *const buf)
 // Return true if "buf" is a "nofile", "acwrite" or "terminal" buffer.
 // This means the buffer name is not a file name.
 bool bt_nofile(const buf_T *const buf)
+  FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT
 {
   return buf != NULL && ((buf->b_p_bt[0] == 'n' && buf->b_p_bt[2] == 'f')
                          || buf->b_p_bt[0] == 'a' || buf->terminal);
@@ -5198,11 +5201,13 @@ bool bt_nofile(const buf_T *const buf)
 
 // Return true if "buf" is a "nowrite", "nofile" or "terminal" buffer.
 bool bt_dontwrite(const buf_T *const buf)
+  FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT
 {
   return buf != NULL && (buf->b_p_bt[0] == 'n' || buf->terminal);
 }
 
 bool bt_dontwrite_msg(const buf_T *const buf)
+  FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT
 {
   if (bt_dontwrite(buf)) {
     EMSG(_("E382: Cannot write, 'buftype' option is set"));

@@ -43,6 +43,7 @@
 #include "nvim/screen.h"
 #include "nvim/strings.h"
 #include "nvim/undo.h"
+#include "nvim/version.h"
 #include "nvim/window.h"
 #include "nvim/profile.h"
 #include "nvim/os/os.h"
@@ -989,7 +990,7 @@ void profile_dump(void)
   FILE        *fd;
 
   if (profile_fname != NULL) {
-    fd = mch_fopen((char *)profile_fname, "w");
+    fd = os_fopen((char *)profile_fname, "w");
     if (fd == NULL) {
       EMSG2(_(e_notopen), profile_fname);
     } else {
@@ -1138,7 +1139,7 @@ static void script_dump_profile(FILE *fd)
       fprintf(fd, "\n");
       fprintf(fd, "count  total (s)   self (s)\n");
 
-      sfd = mch_fopen((char *)si->sn_name, "r");
+      sfd = os_fopen((char *)si->sn_name, "r");
       if (sfd == NULL) {
         fprintf(fd, "Cannot open file!\n");
       } else {
@@ -1791,19 +1792,15 @@ void ex_args(exarg_T *eap)
   } else if (eap->cmdidx == CMD_args) {
     // ":args": list arguments.
     if (ARGCOUNT > 0) {
+      char_u **items = xmalloc(sizeof(char_u *) * (size_t)ARGCOUNT);
       // Overwrite the command, for a short list there is no scrolling
       // required and no wait_return().
       gotocmdline(true);
       for (int i = 0; i < ARGCOUNT; i++) {
-        if (i == curwin->w_arg_idx) {
-          msg_putchar('[');
-        }
-        msg_outtrans(alist_name(&ARGLIST[i]));
-        if (i == curwin->w_arg_idx) {
-          msg_putchar(']');
-        }
-        msg_putchar(' ');
+        items[i] = alist_name(&ARGLIST[i]);
       }
+      list_in_columns(items, ARGCOUNT, curwin->w_arg_idx);
+      xfree(items);
     }
   } else if (eap->cmdidx == CMD_arglocal) {
     garray_T        *gap = &curwin->w_alist->al_ga;
@@ -2858,7 +2855,7 @@ static int requires_py_version(char_u *filename)
     lines = 5;
   }
 
-  file = mch_fopen((char *)filename, "r");
+  file = os_fopen((char *)filename, "r");
   if (file != NULL) {
     for (i = 0; i < lines; i++) {
       if (vim_fgets(IObuff, IOSIZE, file)) {
@@ -3039,6 +3036,7 @@ int do_source(char_u *fname, int check_other, int is_vimrc)
   int save_debug_break_level = debug_break_level;
   scriptitem_T            *si = NULL;
   proftime_T wait_start;
+  bool trigger_source_post = false;
 
   p = expand_env_save(fname);
   if (p == NULL) {
@@ -3059,6 +3057,10 @@ int do_source(char_u *fname, int check_other, int is_vimrc)
       && apply_autocmds(EVENT_SOURCECMD, fname_exp, fname_exp,
                         false, curbuf)) {
     retval = aborting() ? FAIL : OK;
+    if (retval == OK) {
+      // Apply SourcePost autocommands.
+      apply_autocmds(EVENT_SOURCEPOST, fname_exp, fname_exp, false, curbuf);
+    }
     goto theend;
   }
 
@@ -3181,7 +3183,7 @@ int do_source(char_u *fname, int check_other, int is_vimrc)
     }
     si = &SCRIPT_ITEM(current_SID);
     si->sn_name = fname_exp;
-    fname_exp = NULL;
+    fname_exp = vim_strsave(si->sn_name);  // used for autocmd
     if (file_id_ok) {
       si->file_id_valid = true;
       si->file_id = file_id;
@@ -3261,6 +3263,10 @@ int do_source(char_u *fname, int check_other, int is_vimrc)
     time_pop(rel_time);
   }
 
+  if (!got_int) {
+    trigger_source_post = true;
+  }
+
   // After a "finish" in debug mode, need to break at first command of next
   // sourced file.
   if (save_debug_break_level > ex_nesting_level
@@ -3277,6 +3283,10 @@ int do_source(char_u *fname, int check_other, int is_vimrc)
   xfree(cookie.nextline);
   xfree(firstline);
   convert_setup(&cookie.conv, NULL, NULL);
+
+  if (trigger_source_post) {
+    apply_autocmds(EVENT_SOURCEPOST, fname_exp, fname_exp, false, curbuf);
+  }
 
 theend:
   xfree(fname_exp);

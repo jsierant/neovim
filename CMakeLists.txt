@@ -323,18 +323,6 @@ if(HAS_DIAG_COLOR_FLAG)
   endif()
 endif()
 
-if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
-  # 1. Array-bounds testing is broken in some GCC versions before 4.8.5.
-  #    https://gcc.gnu.org/bugzilla/show_bug.cgi?id=56273
-  # 2. But _Pragma("...ignored") is broken (unresolved) in GCC 5+:
-  #    https://gcc.gnu.org/bugzilla/show_bug.cgi?id=66099
-  # So we must disable -Warray-bounds globally for GCC (for kbtree.h, #7083).
-  check_c_compiler_flag(-Warray-bounds HAS_WARRAY_BOUNDS)
-  if(HAS_WARRAY_BOUNDS)
-    add_compile_options(-Wno-array-bounds)
-  endif()
-endif()
-
 option(TRAVIS_CI_BUILD "Travis/QuickBuild CI, extra flags will be set" OFF)
 
 if(TRAVIS_CI_BUILD)
@@ -528,6 +516,7 @@ if(NOT BUSTED_OUTPUT_TYPE)
 endif()
 
 find_program(LUACHECK_PRG luacheck)
+find_program(FLAKE8_PRG flake8)
 find_program(GPERF_PRG gperf)
 
 include(InstallHelpers)
@@ -677,6 +666,15 @@ if(LUACHECK_PRG)
 else()
   add_custom_target(lualint false
     COMMENT "lualint: LUACHECK_PRG not defined")
+endif()
+
+if(FLAKE8_PRG)
+  add_custom_target(pylint
+    COMMAND ${FLAKE8_PRG} contrib/ scripts/ src/ test/
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+else()
+  add_custom_target(pylint false
+    COMMENT "flake8: FLAKE8_PRG not defined")
 endif()
 
 set(CPACK_PACKAGE_NAME "Neovim")

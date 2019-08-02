@@ -589,8 +589,8 @@ void getout(int exitval)
 
   set_vim_var_nr(VV_EXITING, exitval);
 
-  /* Position the cursor on the last screen line, below all the text */
-  ui_cursor_goto((int)Rows - 1, 0);
+  // Position the cursor on the last screen line, below all the text
+  ui_cursor_goto(Rows - 1, 0);
 
   /* Optionally print hashtable efficiency. */
   hash_debug_results();
@@ -656,8 +656,8 @@ void getout(int exitval)
     wait_return(FALSE);
   }
 
-  /* Position the cursor again, the autocommands may have moved it */
-  ui_cursor_goto((int)Rows - 1, 0);
+  // Position the cursor again, the autocommands may have moved it
+  ui_cursor_goto(Rows - 1, 0);
 
   // Apply 'titleold'.
   if (p_title && *p_titleold != NUL) {
@@ -1174,8 +1174,8 @@ scripterror:
             if (scriptout != NULL) {
               goto scripterror;
             }
-            if ((scriptout = mch_fopen(argv[0],
-                    c == 'w' ? APPENDBIN : WRITEBIN)) == NULL) {
+            if ((scriptout = os_fopen(argv[0], c == 'w' ? APPENDBIN : WRITEBIN))
+                == NULL) {
               mch_errmsg(_("Cannot open for script output: \""));
               mch_errmsg(argv[0]);
               mch_errmsg("\"\n");
@@ -1263,8 +1263,9 @@ static void init_params(mparm_T *paramp, int argc, char **argv)
 static void init_startuptime(mparm_T *paramp)
 {
   for (int i = 1; i < paramp->argc; i++) {
-    if (STRICMP(paramp->argv[i], "--startuptime") == 0 && i + 1 < paramp->argc) {
-      time_fd = mch_fopen(paramp->argv[i + 1], "a");
+    if (STRICMP(paramp->argv[i], "--startuptime") == 0
+        && i + 1 < paramp->argc) {
+      time_fd = os_fopen(paramp->argv[i + 1], "a");
       time_start("--- NVIM STARTING ---");
       break;
     }

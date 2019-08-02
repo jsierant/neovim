@@ -1817,7 +1817,7 @@ void do_pending_operator(cmdarg_T *cap, int old_col, bool gui_yank)
         }
       } else {
         curwin->w_p_lbr = lbr_saved;
-        (void)op_yank(oap, !gui_yank);
+        (void)op_yank(oap, !gui_yank, false);
       }
       check_cursor_col();
       break;
@@ -2096,13 +2096,15 @@ static void op_function(oparg_T *oap)
       decl(&curbuf->b_op_end);
     }
 
-    const char_u *const argv[1] = {
-      (const char_u *)(((const char *const[]) {
+    typval_T argv[2];
+    argv[0].v_type = VAR_STRING;
+    argv[1].v_type = VAR_UNKNOWN;
+    argv[0].vval.v_string =
+      (char_u *)(((const char *const[]) {
         [kMTBlockWise] = "block",
         [kMTLineWise] = "line",
         [kMTCharWise] = "char",
-      })[oap->motion_type]),
-    };
+      })[oap->motion_type]);
 
     // Reset virtual_op so that 'virtualedit' can be changed in the
     // function.
@@ -3451,7 +3453,7 @@ static void display_showcmd(void)
     return;
   }
 
-  int showcmd_row = (int)Rows - 1;
+  int showcmd_row = Rows - 1;
   grid_puts_line_start(&default_grid, showcmd_row);
 
   if (!showcmd_is_clear) {
@@ -4037,6 +4039,9 @@ static void nv_mousescroll(cmdarg_T *cap)
     }
   } else {
     mouse_scroll_horiz(cap->arg);
+  }
+  if (curwin != old_curwin && curwin->w_p_cul) {
+    redraw_for_cursorline(curwin);
   }
 
   curwin->w_redr_status = true;
@@ -7462,8 +7467,12 @@ static void nv_esc(cmdarg_T *cap)
         && cmdwin_type == 0
         && !VIsual_active
         && no_reason) {
-      MSG(_("Type  :qa!  and press <Enter> to abandon all changes"
-            " and exit Nvim"));
+      if (anyBufIsChanged()) {
+        MSG(_("Type  :qa!  and press <Enter> to abandon all changes"
+              " and exit Nvim"));
+      } else {
+        MSG(_("Type  :qa  and press <Enter> to exit Nvim"));
+      }
     }
 
     /* Don't reset "restart_edit" when 'insertmode' is set, it won't be

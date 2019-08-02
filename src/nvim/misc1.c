@@ -2735,7 +2735,7 @@ void preserve_exit(void)
  */
 
 #ifndef BREAKCHECK_SKIP
-#  define BREAKCHECK_SKIP 32
+#  define BREAKCHECK_SKIP 1000
 #endif
 
 static int breakcheck_count = 0;
@@ -2836,7 +2836,7 @@ char_u *get_cmd_output(char_u *cmd, char_u *infile, ShellOpts flags,
   xfree(command);
 
   // read the names from the file into memory
-  FILE *fd = mch_fopen((char *)tempname, READBIN);
+  FILE *fd = os_fopen((char *)tempname, READBIN);
 
   if (fd == NULL) {
     EMSG2(_(e_notopen), tempname);
