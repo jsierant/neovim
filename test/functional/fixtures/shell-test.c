@@ -79,7 +79,9 @@ int main(int argc, char **argv)
       for (int i = 0; i < count; i++) {
         printf("%d: %s\n", i, argv[3]);
         fflush(stdout);
-        usleep(1000);  // Wait 1 ms (simulate typical output).
+        if (i % 100 == 0) {
+          usleep(1000);  // Wait 1 ms (simulate typical output).
+        }
       }
     } else if (strcmp(argv[1], "UTF-8") == 0) {
       // test split-up UTF-8 sequence

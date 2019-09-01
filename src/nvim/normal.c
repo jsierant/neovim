@@ -18,6 +18,7 @@
 #include "nvim/ascii.h"
 #include "nvim/normal.h"
 #include "nvim/buffer.h"
+#include "nvim/change.h"
 #include "nvim/charset.h"
 #include "nvim/cursor.h"
 #include "nvim/diff.h"
@@ -2081,7 +2082,8 @@ static void op_colon(oparg_T *oap)
 /*
  * Handle the "g@" operator: call 'operatorfunc'.
  */
-static void op_function(oparg_T *oap)
+static void op_function(const oparg_T *oap)
+  FUNC_ATTR_NONNULL_ALL
 {
   const TriState save_virtual_op = virtual_op;
 
@@ -2110,7 +2112,7 @@ static void op_function(oparg_T *oap)
     // function.
     virtual_op = kNone;
 
-    (void)call_func_retnr(p_opfunc, 1, argv, false);
+    (void)call_func_retnr(p_opfunc, 1, argv);
 
     virtual_op = save_virtual_op;
   }
@@ -7826,13 +7828,15 @@ static void nv_put_opt(cmdarg_T *cap, bool fix_indent)
       // 'virtualedit' and past the end of the line, we use the 'c' operator in
       // do_put(), which requires the visual selection to still be active.
       if (!VIsual_active || VIsual_mode == 'V' || regname != '.') {
-        // Now delete the selected text.
+        // Now delete the selected text. Avoid messages here.
         cap->cmdchar = 'd';
         cap->nchar = NUL;
         cap->oap->regname = NUL;
+        msg_silent++;
         nv_operator(cap);
         do_pending_operator(cap, 0, false);
         empty = (curbuf->b_ml.ml_flags & ML_EMPTY);
+        msg_silent--;
 
         // delete PUT_LINE_BACKWARD;
         cap->oap->regname = regname;
@@ -7881,6 +7885,7 @@ static void nv_put_opt(cmdarg_T *cap, bool fix_indent)
      * line that needs to be deleted now. */
     if (empty && *ml_get(curbuf->b_ml.ml_line_count) == NUL) {
       ml_delete(curbuf->b_ml.ml_line_count, true);
+      deleted_lines(curbuf->b_ml.ml_line_count + 1, 1);
 
       /* If the cursor was in that line, move it to the end of the last
        * line. */

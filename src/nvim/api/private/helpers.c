@@ -745,6 +745,48 @@ String ga_take_string(garray_T *ga)
   return str;
 }
 
+/// Creates "readfile()-style" ArrayOf(String) from a binary string.
+///
+/// - Lines break at \n (NL/LF/line-feed).
+/// - NUL bytes are replaced with NL.
+/// - If the last byte is a linebreak an extra empty list item is added.
+///
+/// @param input  Binary string
+/// @param crlf  Also break lines at CR and CRLF.
+/// @return [allocated] String array
+Array string_to_array(const String input, bool crlf)
+{
+  Array ret = ARRAY_DICT_INIT;
+  for (size_t i = 0; i < input.size; i++) {
+    const char *start = input.data + i;
+    const char *end = start;
+    size_t line_len = 0;
+    for (; line_len < input.size - i; line_len++) {
+      end = start + line_len;
+      if (*end == NL || (crlf && *end == CAR)) {
+        break;
+      }
+    }
+    i += line_len;
+    if (crlf && *end == CAR && i + 1 < input.size && *(end + 1) == NL) {
+      i += 1;  // Advance past CRLF.
+    }
+    String s = {
+      .size = line_len,
+      .data = xmemdupz(start, line_len),
+    };
+    memchrsub(s.data, NUL, NL, line_len);
+    ADD(ret, STRING_OBJ(s));
+    // If line ends at end-of-buffer, add empty final item.
+    // This is "readfile()-style", see also ":help channel-lines".
+    if (i + 1 == input.size && (*end == NL || (crlf && *end == CAR))) {
+      ADD(ret, STRING_OBJ(STRING_INIT));
+    }
+  }
+
+  return ret;
+}
+
 /// Set, tweak, or remove a mapping in a mode. Acts as the implementation for
 /// functions like @ref nvim_buf_set_keymap.
 ///

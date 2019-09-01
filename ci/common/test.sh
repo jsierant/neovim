@@ -80,8 +80,8 @@ valgrind_check() {
   check_logs "${1}" "valgrind-*"
 }
 
-asan_check() {
-  if test "${CLANG_SANITIZER}" = "ASAN_UBSAN" ; then
+check_sanitizer() {
+  if test -n "${CLANG_SANITIZER}"; then
     check_logs "${1}" "*san.*"
   fi
 }
@@ -104,7 +104,7 @@ run_functionaltests() {(
     fail 'functionaltests' F 'Functional tests failed'
   fi
   submit_coverage functionaltest
-  asan_check "${LOG_DIR}"
+  check_sanitizer "${LOG_DIR}"
   valgrind_check "${LOG_DIR}"
   check_core_dumps
   exit_suite
@@ -113,12 +113,12 @@ run_functionaltests() {(
 run_oldtests() {(
   enter_suite oldtests
   ulimit -c unlimited || true
-  if ! make -C "${TRAVIS_BUILD_DIR}/src/nvim/testdir"; then
+  if ! make oldtest; then
     reset
     fail 'oldtests' F 'Legacy tests failed'
   fi
   submit_coverage oldtest
-  asan_check "${LOG_DIR}"
+  check_sanitizer "${LOG_DIR}"
   valgrind_check "${LOG_DIR}"
   check_core_dumps
   exit_suite

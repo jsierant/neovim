@@ -31,12 +31,14 @@
 
 " Check that the screen size is at least 24 x 80 characters.
 if &lines < 24 || &columns < 80 
-  let error = 'Screen size too small! Tests require at least 24 lines with 80 characters'
+  let error = 'Screen size too small! Tests require at least 24 lines with 80 characters, got ' .. &lines .. ' lines with ' .. &columns .. ' characters'
   echoerr error
   split test.log
   $put =error
   write
   split messages
+  call append(line('$'), '')
+  call append(line('$'), 'From ' . expand('%') . ':')
   call append(line('$'), error)
   write
   qa!
@@ -49,13 +51,22 @@ source setup.vim
 " This also enables use of line continuation.
 set nocp viminfo+=nviminfo
 
-" Use utf-8 or latin1 by default, instead of whatever the system default
-" happens to be.  Individual tests can overrule this at the top of the file.
-if has('multi_byte')
-  set encoding=utf-8
-else
-  set encoding=latin1
-endif
+" Use utf-8 by default, instead of whatever the system default happens to be.
+" Individual tests can overrule this at the top of the file.
+set encoding=utf-8
+
+" REDIR_TEST_TO_NULL has a very permissive SwapExists autocommand which is for
+" the test_name.vim file itself. Replace it here with a more restrictive one,
+" so we still catch mistakes.
+let s:test_script_fname = expand('%')
+au! SwapExists * call HandleSwapExists()
+func HandleSwapExists()
+  " Only ignore finding a swap file for the test script (the user might be
+  " editing it and do ":make test_name") and the output file.
+  if expand('<afile>') == 'messages' || expand('<afile>') =~ s:test_script_fname
+    let v:swapchoice = 'e'
+  endif
+endfunc
 
 " Avoid stopping at the "hit enter" prompt
 set nomore
@@ -63,8 +74,11 @@ set nomore
 " Output all messages in English.
 lang mess C
 
+" Nvim: append runtime from build dir, which contains the generated doc/tags.
+let &runtimepath .= ','.expand($BUILD_DIR).'/runtime/'
+
 " Always use forward slashes.
-" set shellslash
+set shellslash
 
 " Prepare for calling test_garbagecollect_now().
 let v:testing = 1
@@ -148,8 +162,9 @@ func RunTheTest(test)
     endtry
   endif
 
-  " Clear any autocommands
+  " Clear any autocommands and put back the catch-all for SwapExists.
   au!
+  au SwapExists * call HandleSwapExists()
 
   " Close any extra tab pages and windows and make the current one not modified.
   while tabpagenr('$') > 1
@@ -256,6 +271,9 @@ if expand('%') =~ 'test_vimscript.vim'
 else
   try
     source %
+  catch /^\cskipped/
+    call add(s:messages, '    Skipped')
+    call add(s:skipped, 'SKIPPED ' . expand('%') . ': ' . substitute(v:exception, '^\S*\s\+', '',  ''))
   catch
     let s:fail += 1
     call add(s:errors, 'Caught exception: ' . v:exception . ' @ ' . v:throwpoint)
@@ -266,14 +284,16 @@ endif
 let s:flaky_tests = [
       \ 'Test_cursorhold_insert()',
       \ 'Test_exit_callback_interval()',
+      \ 'Test_map_timeout_with_timer_interrupt()',
       \ 'Test_oneshot()',
       \ 'Test_out_cb()',
       \ 'Test_paused()',
-      \ 'Test_popup_and_window_resize()',
       \ 'Test_quoteplus()',
       \ 'Test_quotestar()',
       \ 'Test_reltime()',
+      \ 'Test_repeat_many()',
       \ 'Test_repeat_three()',
+      \ 'Test_stop_all_in_callback()',
       \ 'Test_terminal_composing_unicode()',
       \ 'Test_terminal_redir_file()',
       \ 'Test_terminal_tmap()',

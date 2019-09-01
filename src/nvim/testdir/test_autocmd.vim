@@ -300,7 +300,6 @@ func Test_augroup_warning()
 endfunc
 
 func Test_BufReadCmdHelp()
-  helptags ALL
   " This used to cause access to free memory
   au BufReadCmd * e +h
   help
@@ -382,7 +381,6 @@ func Test_three_windows()
 
   only
 
-  helptags ALL
   help
   wincmd w
   1quit
@@ -811,7 +809,6 @@ endfunc
 " Test for autocommand that deletes the current buffer on BufLeave event.
 " Also test deleting the last buffer, should give a new, empty buffer.
 func Test_BufLeave_Wipe()
-  throw 'skipped: TODO: '
   %bwipe!
   let content = ['start of test file Xxx',
 	      \ 'this is a test',

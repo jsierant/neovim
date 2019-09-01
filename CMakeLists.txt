@@ -250,7 +250,7 @@ check_c_source_compiles("
 int main(void)
 {
   void *trace[1];
-  int trace_size = backtrace(trace, 1);
+  backtrace(trace, 1);
   return 0;
 }
 " HAVE_EXECINFO_BACKTRACE)
@@ -258,7 +258,7 @@ int main(void)
 check_c_source_compiles("
 int main(void)
 {
-  int a;
+  int a = 42;
   __builtin_add_overflow(a, a, &a);
   __builtin_sub_overflow(a, a, &a);
   return 0;
@@ -541,6 +541,7 @@ add_subdirectory(test/includes)
 add_subdirectory(config)
 add_subdirectory(test/functional/fixtures)  # compile test programs
 add_subdirectory(runtime)
+get_directory_property(GENERATED_HELP_TAGS DIRECTORY runtime DEFINITION GENERATED_HELP_TAGS)
 if(WIN32)
   install_helper(
     FILES ${DEPS_PREFIX}/share/nvim-qt/runtime/plugin/nvim_gui_shim.vim
@@ -562,7 +563,7 @@ if(BUSTED_PRG)
   endif()
 
   set(UNITTEST_PREREQS nvim-test unittest-headers)
-  set(FUNCTIONALTEST_PREREQS nvim printargs-test shell-test)
+  set(FUNCTIONALTEST_PREREQS nvim printargs-test shell-test ${GENERATED_HELP_TAGS})
   if(NOT WIN32)
     list(APPEND FUNCTIONALTEST_PREREQS tty-test)
   endif()
@@ -666,15 +667,6 @@ if(LUACHECK_PRG)
 else()
   add_custom_target(lualint false
     COMMENT "lualint: LUACHECK_PRG not defined")
-endif()
-
-if(FLAKE8_PRG)
-  add_custom_target(pylint
-    COMMAND ${FLAKE8_PRG} contrib/ scripts/ src/ test/
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-else()
-  add_custom_target(pylint false
-    COMMENT "flake8: FLAKE8_PRG not defined")
 endif()
 
 set(CPACK_PACKAGE_NAME "Neovim")

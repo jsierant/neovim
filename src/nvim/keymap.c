@@ -309,7 +309,6 @@ static const struct key_name_entry {
   { K_ZERO,            "Nul" },
   { K_SNR,             "SNR" },
   { K_PLUG,            "Plug" },
-  { K_PASTE,           "Paste" },
   { K_COMMAND,         "Cmd" },
   { 0,                 NULL }
   // NOTE: When adding a long name update MAX_KEY_NAME_LEN.
@@ -604,7 +603,7 @@ int find_special_key(const char_u **srcp, const size_t src_len, int *const modp,
         // Anything accepted, like <C-?>.
         // <C-"> or <M-"> are not special in strings as " is
         // the string delimiter. With a backslash it works: <M-\">
-        if (end - bp > l && !(in_string && bp[1] == '"') && bp[2] == '>') {
+        if (end - bp > l && !(in_string && bp[1] == '"') && bp[l+1] == '>') {
           bp += l;
         } else if (end - bp > 2 && in_string && bp[1] == '\\'
                    && bp[2] == '"' && bp[3] == '>') {
@@ -941,3 +940,14 @@ char_u *replace_termcodes(const char_u *from, const size_t from_len,
   return *bufp;
 }
 
+/// Logs a single key as a human-readable keycode.
+void log_key(int log_level, int key)
+{
+  if (log_level < MIN_LOG_LEVEL) {
+    return;
+  }
+  char *keyname = key == K_EVENT
+    ? "K_EVENT"
+    : (char *)get_special_key_name(key, mod_mask);
+  LOG(log_level, "input: %s", keyname);
+}

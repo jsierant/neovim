@@ -114,7 +114,7 @@ build/.ran-third-party-cmake::
 	touch $@
 
 # TODO: cmake 3.2+ add_custom_target() has a USES_TERMINAL flag.
-oldtest: | nvim helptags
+oldtest: | nvim build/runtime/doc/tags
 	+$(SINGLE_MAKE) -C src/nvim/testdir clean
 ifeq ($(strip $(TEST_FILE)),)
 	+$(SINGLE_MAKE) -C src/nvim/testdir NVIM_PRG="$(realpath build/bin/nvim)" $(MAKEOVERRIDES)
@@ -122,11 +122,11 @@ else
 	+$(SINGLE_MAKE) -C src/nvim/testdir NVIM_PRG="$(realpath build/bin/nvim)" NEW_TESTS=$(TEST_FILE) SCRIPTS= $(MAKEOVERRIDES)
 endif
 
-helptags: | nvim
+build/runtime/doc/tags helptags: | nvim
 	+$(BUILD_CMD) -C build runtime/doc/tags
 
 # Builds help HTML _and_ checks for invalid help tags.
-helphtml: | nvim helptags
+helphtml: | nvim build/runtime/doc/tags
 	+$(BUILD_CMD) -C build doc_html
 
 functionaltest: | nvim
@@ -138,8 +138,13 @@ functionaltest-lua: | nvim
 lualint: | build/.ran-cmake deps
 	$(BUILD_CMD) -C build lualint
 
-pylint: | build/.ran-cmake deps
-	$(BUILD_CMD) -C build pylint
+pylint:
+	flake8 contrib/ scripts/ src/ test/
+
+# Run pylint only if flake8 is installed.
+_opt_pylint:
+	@command -v flake8 && { $(MAKE) pylint; exit $$?; } \
+		|| echo "SKIP: pylint (flake8 not found)"
 
 unittest: | nvim
 	+$(BUILD_CMD) -C build unittest
@@ -182,7 +187,7 @@ appimage:
 appimage-%:
 	bash scripts/genappimage.sh $*
 
-lint: check-single-includes clint lualint pylint
+lint: check-single-includes clint lualint _opt_pylint
 
 # Generic pattern rules, allowing for `make build/bin/nvim` etc.
 # Does not work with "Unix Makefiles".

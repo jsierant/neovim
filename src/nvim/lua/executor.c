@@ -23,6 +23,7 @@
 #include "nvim/cursor.h"
 #include "nvim/undo.h"
 #include "nvim/ascii.h"
+#include "nvim/change.h"
 
 #ifdef WIN32
 #include "nvim/os/os.h"
@@ -109,6 +110,65 @@ static int nlua_stricmp(lua_State *const lstate) FUNC_ATTR_NONNULL_ALL
   } while (true);
   lua_pop(lstate, 2);
   lua_pushnumber(lstate, (lua_Number)((ret > 0) - (ret < 0)));
+  return 1;
+}
+
+/// convert byte index to UTF-32 and UTF-16 indicies
+///
+/// Expects a string and an optional index. If no index is supplied, the length
+/// of the string is returned.
+///
+/// Returns two values: the UTF-32 and UTF-16 indicies.
+static int nlua_str_utfindex(lua_State *const lstate) FUNC_ATTR_NONNULL_ALL
+{
+  size_t s1_len;
+  const char *s1 = luaL_checklstring(lstate, 1, &s1_len);
+  intptr_t idx;
+  if (lua_gettop(lstate) >= 2) {
+    idx = luaL_checkinteger(lstate, 2);
+    if (idx < 0 || idx > (intptr_t)s1_len) {
+      return luaL_error(lstate, "index out of range");
+    }
+  } else {
+    idx = (intptr_t)s1_len;
+  }
+
+  size_t codepoints = 0, codeunits = 0;
+  mb_utflen((const char_u *)s1, (size_t)idx, &codepoints, &codeunits);
+
+  lua_pushinteger(lstate, (long)codepoints);
+  lua_pushinteger(lstate, (long)codeunits);
+
+  return 2;
+}
+
+/// convert UTF-32 or UTF-16 indicies to byte index.
+///
+/// Expects up to three args: string, index and use_utf16.
+/// If use_utf16 is not supplied it defaults to false (use UTF-32)
+///
+/// Returns the byte index.
+static int nlua_str_byteindex(lua_State *const lstate) FUNC_ATTR_NONNULL_ALL
+{
+  size_t s1_len;
+  const char *s1 = luaL_checklstring(lstate, 1, &s1_len);
+  intptr_t idx = luaL_checkinteger(lstate, 2);
+  if (idx < 0) {
+    return luaL_error(lstate, "index out of range");
+  }
+  bool use_utf16 = false;
+  if (lua_gettop(lstate) >= 3) {
+    use_utf16 = lua_toboolean(lstate, 3);
+  }
+
+  ssize_t byteidx = mb_utf_index_to_bytes((const char_u *)s1, s1_len,
+                                          (size_t)idx, use_utf16);
+  if (byteidx == -1) {
+    return luaL_error(lstate, "index out of range");
+  }
+
+  lua_pushinteger(lstate, (long)byteidx);
+
   return 1;
 }
 
@@ -209,7 +269,9 @@ static int nlua_state_init(lua_State *const lstate) FUNC_ATTR_NONNULL_ALL
 #endif
 
   // vim
-  if (luaL_dostring(lstate, (char *)&vim_module[0])) {
+  const char *code = (char *)&vim_module[0];
+  if (luaL_loadbuffer(lstate, code, strlen(code), "@vim.lua")
+      || lua_pcall(lstate, 0, LUA_MULTRET, 0)) {
     nlua_error(lstate, _("E5106: Error while creating vim module: %.*s"));
     return 1;
   }
@@ -220,6 +282,12 @@ static int nlua_state_init(lua_State *const lstate) FUNC_ATTR_NONNULL_ALL
   // stricmp
   lua_pushcfunction(lstate, &nlua_stricmp);
   lua_setfield(lstate, -2, "stricmp");
+  // str_utfindex
+  lua_pushcfunction(lstate, &nlua_str_utfindex);
+  lua_setfield(lstate, -2, "str_utfindex");
+  // str_byteindex
+  lua_pushcfunction(lstate, &nlua_str_byteindex);
+  lua_setfield(lstate, -2, "str_byteindex");
   // schedule
   lua_pushcfunction(lstate, &nlua_schedule);
   lua_setfield(lstate, -2, "schedule");

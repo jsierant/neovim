@@ -198,10 +198,7 @@ static Array cmdline_block = ARRAY_DICT_INIT;
 /*
  * Type used by call_user_expand_func
  */
-typedef void *(*user_expand_func_T)(const char_u *,
-                                    int,
-                                    typval_T *,
-                                    bool);
+typedef void *(*user_expand_func_T)(const char_u *, int, typval_T *);
 
 static histentry_T *(history[HIST_COUNT]) = {NULL, NULL, NULL, NULL, NULL};
 static int hisidx[HIST_COUNT] = {-1, -1, -1, -1, -1};       /* lastused entry */
@@ -532,7 +529,7 @@ static int command_line_check(VimState *state)
 
 static int command_line_execute(VimState *state, int key)
 {
-  if (key == K_IGNORE || key == K_PASTE) {
+  if (key == K_IGNORE) {
     return -1;  // get another key
   }
 
@@ -3483,6 +3480,7 @@ void compute_cmdrow(void)
     cmdline_row = wp->w_winrow + wp->w_height
                   + wp->w_status_height;
   }
+  lines_left = cmdline_row;
 }
 
 static void cursorcmd(void)
@@ -4211,24 +4209,24 @@ static int showmatches(expand_T *xp, int wildmenu)
             || xp->xp_context == EXPAND_BUFFERS) {
           /* highlight directories */
           if (xp->xp_numfiles != -1) {
-            char_u  *halved_slash;
-            char_u  *exp_path;
-
-            /* Expansion was done before and special characters
-             * were escaped, need to halve backslashes.  Also
-             * $HOME has been replaced with ~/. */
-            exp_path = expand_env_save_opt(files_found[k], TRUE);
-            halved_slash = backslash_halve_save(
-                exp_path != NULL ? exp_path : files_found[k]);
+            // Expansion was done before and special characters
+            // were escaped, need to halve backslashes.  Also
+            // $HOME has been replaced with ~/.
+            char_u *exp_path = expand_env_save_opt(files_found[k], true);
+            char_u *path = exp_path != NULL ? exp_path : files_found[k];
+            char_u *halved_slash = backslash_halve_save(path);
             j = os_isdir(halved_slash);
             xfree(exp_path);
-            xfree(halved_slash);
-          } else
-            /* Expansion was done here, file names are literal. */
+            if (halved_slash != path) {
+              xfree(halved_slash);
+            }
+          } else {
+            // Expansion was done here, file names are literal.
             j = os_isdir(files_found[k]);
-          if (showtail)
+          }
+          if (showtail) {
             p = L_SHOWFILE(k);
-          else {
+          } else {
             home_replace(NULL, files_found[k], NameBuff, MAXPATHL,
                 TRUE);
             p = NameBuff;
@@ -5058,12 +5056,12 @@ static void expand_shellcmd(char_u *filepat, int *num_file, char_u ***file,
 /// return the result (either a string or a List).
 static void * call_user_expand_func(user_expand_func_T user_expand_func,
                                     expand_T *xp, int *num_file, char_u ***file)
+  FUNC_ATTR_NONNULL_ALL
 {
   char_u keep = 0;
   typval_T args[4];
   char_u *pat = NULL;
   int save_current_SID = current_SID;
-  void        *ret;
   struct cmdline_info save_ccline;
 
   if (xp->xp_arg == NULL || xp->xp_arg[0] == '\0' || xp->xp_line == NULL)
@@ -5091,10 +5089,7 @@ static void * call_user_expand_func(user_expand_func_T user_expand_func,
   ccline.cmdprompt = NULL;
   current_SID = xp->xp_scriptID;
 
-  ret = user_expand_func(xp->xp_arg,
-                         3,
-                         args,
-                         false);
+  void *const ret = user_expand_func(xp->xp_arg, 3, args);
 
   ccline = save_ccline;
   current_SID = save_current_SID;

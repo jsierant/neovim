@@ -103,6 +103,7 @@ typedef struct {
   bool busy, is_invisible;
   bool cork, overflow;
   bool cursor_color_changed;
+  bool is_starting;
   cursorentry_T cursor_shapes[SHAPE_IDX_COUNT];
   HlAttrs clear_attrs;
   kvec_t(HlAttrs) attrs;
@@ -122,8 +123,9 @@ typedef struct {
     int reset_scroll_region;
     int set_cursor_style, reset_cursor_style;
     int save_title, restore_title;
-    int enter_undercurl_mode, exit_undercurl_mode, set_underline_color;
     int get_bg;
+    int set_underline_style;
+    int set_underline_color;
   } unibi_ext;
   char *space_buf;
 } TUIData;
@@ -215,6 +217,7 @@ static void terminfo_start(UI *ui)
   data->unibi_ext.set_cursor_style = -1;
   data->unibi_ext.reset_cursor_style = -1;
   data->unibi_ext.get_bg = -1;
+  data->unibi_ext.set_underline_color = -1;
   data->out_fd = 1;
   data->out_isatty = os_isatty(data->out_fd);
 
@@ -396,6 +399,7 @@ static void tui_main(UIBridgeData *bridge, UI *ui)
   ui->data = data;
   data->bridge = bridge;
   data->loop = &tui_loop;
+  data->is_starting = true;
   kv_init(data->invalid_regions);
   signal_watcher_init(data->loop, &data->winch_handle, ui);
   signal_watcher_init(data->loop, &data->cont_handle, data);
@@ -426,7 +430,7 @@ static void tui_main(UIBridgeData *bridge, UI *ui)
     tui_terminal_after_startup(ui);
     // Tickle `main_loop` with a dummy event, else the initial "focus-gained"
     // terminal response may not get processed until user hits a key.
-    loop_schedule_deferred(&main_loop, event_create(tui_dummy_event, 0));
+    loop_schedule_deferred(&main_loop, event_create(loop_dummy_event, 0));
   }
   // "Passive" (I/O-driven) loop: TUI thread "main loop".
   while (!tui_is_stopped(ui)) {
@@ -445,16 +449,12 @@ static void tui_main(UIBridgeData *bridge, UI *ui)
   xfree(data);
 }
 
-static void tui_dummy_event(void **argv)
-{
-}
-
 /// Handoff point between the main (ui_bridge) thread and the TUI thread.
 static void tui_scheduler(Event event, void *d)
 {
   UI *ui = d;
   TUIData *data = ui->data;
-  loop_schedule(data->loop, event);  // `tui_loop` local to tui_main().
+  loop_schedule_fast(data->loop, event);  // `tui_loop` local to tui_main().
 }
 
 #ifdef UNIX
@@ -532,7 +532,7 @@ static void update_attrs(UI *ui, int attr_id)
 
   bool underline;
   bool undercurl;
-  if (data->unibi_ext.enter_undercurl_mode) {
+  if (data->unibi_ext.set_underline_style != -1) {
     underline = attr & HL_UNDERLINE;
     undercurl = attr & HL_UNDERCURL;
   } else {
@@ -575,10 +575,11 @@ static void update_attrs(UI *ui, int attr_id)
   if (italic) {
     unibi_out(ui, unibi_enter_italics_mode);
   }
-  if (undercurl && data->unibi_ext.enter_undercurl_mode) {
-    unibi_out_ext(ui, data->unibi_ext.enter_undercurl_mode);
+  if (undercurl && data->unibi_ext.set_underline_style != -1) {
+    UNIBI_SET_NUM_VAR(data->params[0], 3);
+    unibi_out_ext(ui, data->unibi_ext.set_underline_style);
   }
-  if ((undercurl || underline) && data->unibi_ext.set_underline_color) {
+  if ((undercurl || underline) && data->unibi_ext.set_underline_color != -1) {
     int color = attrs.rgb_sp_color;
     if (color != -1) {
         UNIBI_SET_NUM_VAR(data->params[0], (color >> 16) & 0xff);  // red
@@ -888,7 +889,7 @@ static void tui_grid_resize(UI *ui, Integer g, Integer width, Integer height)
     r->right = MIN(r->right, grid->width);
   }
 
-  if (!got_winch && (!starting || did_user_set_dimensions)) {
+  if (!got_winch && (!data->is_starting || did_user_set_dimensions)) {
     // Resize the _host_ terminal.
     UNIBI_SET_NUM_VAR(data->params[0], (int)height);
     UNIBI_SET_NUM_VAR(data->params[1], (int)width);
@@ -1051,6 +1052,7 @@ static void tui_mode_change(UI *ui, String mode, Integer mode_idx)
 {
   TUIData *data = ui->data;
   tui_set_mode(ui, (ModeShape)mode_idx);
+  data->is_starting = false;  // mode entered, no longer starting
   data->showing_mode = (ModeShape)mode_idx;
 }
 
@@ -1355,7 +1357,7 @@ static void tui_guess_size(UI *ui)
   int width = 0, height = 0;
 
   // 1 - look for non-default 'columns' and 'lines' options during startup
-  if (starting && (Columns != DFLT_COLS || Rows != DFLT_ROWS)) {
+  if (data->is_starting && (Columns != DFLT_COLS || Rows != DFLT_ROWS)) {
     did_user_set_dimensions = true;
     assert(Columns >= INT_MIN && Columns <= INT_MAX);
     assert(Rows >= INT_MIN && Rows <= INT_MAX);
@@ -1908,13 +1910,19 @@ static void augment_terminfo(TUIData *data, const char *term,
   data->unibi_ext.disable_mouse = (int)unibi_add_ext_str(
       ut, "ext.disable_mouse", "\x1b[?1002l\x1b[?1006l");
 
-  int ext_bool_Su = unibi_find_ext_bool(ut, "Su");  // used by kitty
-  if (vte_version >= 5102
-      || (ext_bool_Su != -1 && unibi_get_ext_bool(ut, (size_t)ext_bool_Su))) {
-      data->unibi_ext.enter_undercurl_mode = (int)unibi_add_ext_str(
-          ut, "ext.enter_undercurl_mode", "\x1b[4:3m");
-      data->unibi_ext.exit_undercurl_mode = (int)unibi_add_ext_str(
-          ut, "ext.exit_undercurl_mode", "\x1b[4:0m");
+  // Extended underline.
+  // terminfo will have Smulx for this (but no support for colors yet).
+  data->unibi_ext.set_underline_style = unibi_find_ext_str(ut, "Smulx");
+  if (data->unibi_ext.set_underline_style == -1) {
+      int ext_bool_Su = unibi_find_ext_bool(ut, "Su");  // used by kitty
+      if (vte_version >= 5102
+          || (ext_bool_Su != -1
+              && unibi_get_ext_bool(ut, (size_t)ext_bool_Su))) {
+          data->unibi_ext.set_underline_style = (int)unibi_add_ext_str(
+              ut, "ext.set_underline_style", "\x1b[4:%p1%dm");
+      }
+  }
+  if (data->unibi_ext.set_underline_style != -1) {
       // Only support colon syntax. #9270
       data->unibi_ext.set_underline_color = (int)unibi_add_ext_str(
           ut, "ext.set_underline_color", "\x1b[58:2::%p1%d:%p2%d:%p3%dm");
