@@ -102,9 +102,6 @@ bool os_env_exists(const char *name)
   assert(r != UV_EINVAL);
   if (r != 0 && r != UV_ENOENT && r != UV_ENOBUFS) {
     ELOG("uv_os_getenv(%s) failed: %d %s", name, r, uv_err_name(r));
-#ifdef WIN32
-    return (r == UV_UNKNOWN);
-#endif
   }
   return (r == 0 || r == UV_ENOBUFS);
 }
@@ -135,7 +132,16 @@ int os_setenv(const char *name, const char *value, int overwrite)
   }
 #endif
   uv_mutex_lock(&mutex);
-  int r = uv_os_setenv(name, value);
+  int r;
+#ifdef WIN32
+  // libintl uses getenv() for LC_ALL/LANG/etc., so we must use _putenv_s().
+  if (striequal(name, "LC_ALL") || striequal(name, "LANGUAGE")
+      || striequal(name, "LANG") || striequal(name, "LC_MESSAGES")) {
+    r = _putenv_s(name, value);  // NOLINT
+    assert(r == 0);
+  }
+#endif
+  r = uv_os_setenv(name, value);
   assert(r != UV_EINVAL);
   // Destroy the old map item. Do this AFTER uv_os_setenv(), because `value`
   // could be a previous os_getenv() result.

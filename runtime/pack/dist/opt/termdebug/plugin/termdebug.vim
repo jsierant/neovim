@@ -67,8 +67,8 @@ command -nargs=* -complete=file -bang Termdebug call s:StartDebug(<bang>0, <f-ar
 command -nargs=+ -complete=file -bang TermdebugCommand call s:StartDebugCommand(<bang>0, <f-args>)
 
 " Name of the gdb command, defaults to "gdb".
-if !exists('termdebugger')
-  let termdebugger = 'gdb'
+if !exists('g:termdebugger')
+  let g:termdebugger = 'gdb'
 endif
 
 let s:pc_id = 12
@@ -106,9 +106,14 @@ endfunc
 
 func s:StartDebug_internal(dict)
   if exists('s:gdbwin')
-    echoerr 'Terminal debugger already running'
+    echoerr 'Terminal debugger already running, cannot run two'
     return
   endif
+  if !executable(g:termdebugger)
+    echoerr 'Cannot execute debugger program "' .. g:termdebugger .. '"'
+    return
+  endif
+
   let s:ptywin = 0
   let s:pid = 0
 
@@ -238,6 +243,10 @@ func s:StartDebug_term(dict)
         if response =~ 'New UI allocated'
           " Success!
           break
+        endif
+        if response =~ 'Reading symbols from' && response !~ 'new-ui'
+          " Reading symbols might take a while
+	  let try_count -= 1
         endif
       endif
     endfor
@@ -685,10 +694,9 @@ function! s:OpenHoverPreview(lines, filetype) abort
             \   'col': col,
             \   'width': width,
             \   'height': height,
+            \   'style': 'minimal',
             \ })
-      call nvim_win_set_option(float_win_id, 'relativenumber', v:false)
-      call nvim_win_set_option(float_win_id, 'signcolumn', 'no')
-      call nvim_win_set_option(float_win_id, 'signcolumn', 'no')
+
       if a:filetype isnot v:null
         call nvim_win_set_option(float_win_id, 'filetype', a:filetype)
       endif

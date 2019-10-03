@@ -6,6 +6,13 @@
 cmake_minimum_required(VERSION 2.8.12)
 project(nvim C)
 
+if(POLICY CMP0065)
+  cmake_policy(SET CMP0065 NEW)
+endif()
+if(POLICY CMP0060)
+  cmake_policy(SET CMP0060 NEW)
+endif()
+
 # Point CMake at any custom modules we may ship
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
@@ -113,27 +120,14 @@ set_property(CACHE CMAKE_BUILD_TYPE PROPERTY
 # If not in a git repo (e.g., a tarball) these tokens define the complete
 # version string, else they are combined with the result of `git describe`.
 set(NVIM_VERSION_MAJOR 0)
-set(NVIM_VERSION_MINOR 4)
+set(NVIM_VERSION_MINOR 5)
 set(NVIM_VERSION_PATCH 0)
 set(NVIM_VERSION_PRERELEASE "-dev") # for package maintainers
 
 # API level
 set(NVIM_API_LEVEL 6)         # Bump this after any API change.
 set(NVIM_API_LEVEL_COMPAT 0)  # Adjust this after a _breaking_ API change.
-set(NVIM_API_PRERELEASE true)
-
-file(TO_CMAKE_PATH ${CMAKE_CURRENT_LIST_DIR}/.git FORCED_GIT_DIR)
-include(GetGitRevisionDescription)
-get_git_head_revision(GIT_REFSPEC NVIM_VERSION_COMMIT)
-if(NVIM_VERSION_COMMIT) # is a git repo
-  git_describe(NVIM_VERSION_MEDIUM)
-  # `git describe` annotates the most recent tagged release; for pre-release
-  # builds we must replace that with the unreleased version.
-  string(REGEX REPLACE "^v[0-9]+\\.[0-9]+\\.[0-9]+"
-         "v${NVIM_VERSION_MAJOR}.${NVIM_VERSION_MINOR}.${NVIM_VERSION_PATCH}"
-         NVIM_VERSION_MEDIUM
-         ${NVIM_VERSION_MEDIUM})
-endif()
+set(NVIM_API_PRERELEASE false)
 
 set(NVIM_VERSION_BUILD_TYPE "${CMAKE_BUILD_TYPE}")
 # NVIM_VERSION_CFLAGS set further below.
@@ -375,6 +369,13 @@ include_directories(SYSTEM ${MSGPACK_INCLUDE_DIRS})
 find_package(LibLUV 1.30.0 REQUIRED)
 include_directories(SYSTEM ${LIBLUV_INCLUDE_DIRS})
 
+find_package(UTF8PROC REQUIRED)
+include_directories(SYSTEM ${UTF8PROC_INCLUDE_DIRS})
+if(WIN32)
+  add_definitions(-DUTF8PROC_STATIC)
+endif()
+
+
 # Note: The test lib requires LuaJIT; it will be skipped if LuaJIT is missing.
 option(PREFER_LUA "Prefer Lua over LuaJIT in the nvim executable." OFF)
 
@@ -408,7 +409,7 @@ endif()
 option(FEAT_TUI "Enable the Terminal UI" ON)
 
 if(FEAT_TUI)
-  find_package(Unibilium 2.0 REQUIRED)
+  find_package(UNIBILIUM 2.0 REQUIRED)
   include_directories(SYSTEM ${UNIBILIUM_INCLUDE_DIRS})
 
   list(APPEND CMAKE_REQUIRED_INCLUDES "${UNIBILIUM_INCLUDE_DIRS}")
@@ -432,7 +433,7 @@ if(FEAT_TUI)
   include_directories(SYSTEM ${LIBTERMKEY_INCLUDE_DIRS})
 endif()
 
-find_package(LibVterm REQUIRED)
+find_package(LIBVTERM 0.1 REQUIRED)
 include_directories(SYSTEM ${LIBVTERM_INCLUDE_DIRS})
 
 if(WIN32)
@@ -533,10 +534,7 @@ install_helper(
 #
 
 add_subdirectory(src/nvim)
-# Read compilation flags from src/nvim, used in config subdirectory below.
-include(GetCompileFlags)
-get_compile_flags(NVIM_VERSION_CFLAGS)
-
+get_directory_property(NVIM_VERSION_CFLAGS DIRECTORY src/nvim DEFINITION NVIM_VERSION_CFLAGS)
 add_subdirectory(test/includes)
 add_subdirectory(config)
 add_subdirectory(test/functional/fixtures)  # compile test programs
@@ -563,7 +561,7 @@ if(BUSTED_PRG)
   endif()
 
   set(UNITTEST_PREREQS nvim-test unittest-headers)
-  set(FUNCTIONALTEST_PREREQS nvim printargs-test shell-test ${GENERATED_HELP_TAGS})
+  set(FUNCTIONALTEST_PREREQS nvim printargs-test shell-test streams-test ${GENERATED_HELP_TAGS})
   if(NOT WIN32)
     list(APPEND FUNCTIONALTEST_PREREQS tty-test)
   endif()

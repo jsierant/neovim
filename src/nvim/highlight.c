@@ -7,6 +7,7 @@
 #include "nvim/highlight.h"
 #include "nvim/highlight_defs.h"
 #include "nvim/map.h"
+#include "nvim/message.h"
 #include "nvim/popupmnu.h"
 #include "nvim/screen.h"
 #include "nvim/syntax.h"
@@ -161,6 +162,8 @@ int hl_get_ui_attr(int idx, int final_id, bool optional)
     if (pum_drawn()) {
       must_redraw_pum = true;
     }
+  } else if (idx == HLF_MSG) {
+    msg_grid.blending = attrs.hl_blend > -1;
   }
 
   if (optional && !available) {
@@ -305,8 +308,16 @@ int hl_combine_attr(int char_attr, int prim_attr)
   // start with low-priority attribute, and override colors if present below.
   HlAttrs new_en = char_aep;
 
-  new_en.cterm_ae_attr |= spell_aep.cterm_ae_attr;
-  new_en.rgb_ae_attr |= spell_aep.rgb_ae_attr;
+  if (spell_aep.cterm_ae_attr & HL_NOCOMBINE) {
+    new_en.cterm_ae_attr = spell_aep.cterm_ae_attr;
+  } else {
+    new_en.cterm_ae_attr |= spell_aep.cterm_ae_attr;
+  }
+  if (spell_aep.rgb_ae_attr & HL_NOCOMBINE) {
+    new_en.rgb_ae_attr = spell_aep.rgb_ae_attr;
+  } else {
+    new_en.rgb_ae_attr |= spell_aep.rgb_ae_attr;
+  }
 
   if (spell_aep.cterm_fg_color > 0) {
     new_en.cterm_fg_color = spell_aep.cterm_fg_color;
@@ -593,6 +604,10 @@ Dictionary hlattrs2dict(HlAttrs ae, bool use_rgb)
 
   if (mask & HL_INVERSE) {
     PUT(hl, "reverse", BOOLEAN_OBJ(true));
+  }
+
+  if (mask & HL_STRIKETHROUGH) {
+    PUT(hl, "strikethrough", BOOLEAN_OBJ(true));
   }
 
   if (use_rgb) {

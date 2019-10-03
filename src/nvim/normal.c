@@ -1553,9 +1553,11 @@ void do_pending_operator(cmdarg_T *cap, int old_col, bool gui_yank)
       if (!VIsual_active) {
         if (hasFolding(oap->start.lnum, &oap->start.lnum, NULL))
           oap->start.col = 0;
-        if (hasFolding(curwin->w_cursor.lnum, NULL,
-                &curwin->w_cursor.lnum))
+        if ((curwin->w_cursor.col > 0 || oap->inclusive)
+            && hasFolding(curwin->w_cursor.lnum, NULL,
+                          &curwin->w_cursor.lnum)) {
           curwin->w_cursor.col = (colnr_T)STRLEN(get_cursor_line_ptr());
+        }
       }
       oap->end = curwin->w_cursor;
       curwin->w_cursor = oap->start;
@@ -3455,16 +3457,18 @@ static void display_showcmd(void)
     return;
   }
 
+  msg_grid_validate();
   int showcmd_row = Rows - 1;
-  grid_puts_line_start(&default_grid, showcmd_row);
+  grid_puts_line_start(&msg_grid_adj, showcmd_row);
 
   if (!showcmd_is_clear) {
-    grid_puts(&default_grid, showcmd_buf, showcmd_row, sc_col, 0);
+    grid_puts(&msg_grid_adj, showcmd_buf, showcmd_row, sc_col,
+              HL_ATTR(HLF_MSG));
   }
 
   // clear the rest of an old message by outputting up to SHOWCMD_COLS spaces
-  grid_puts(&default_grid, (char_u *)"          " + len, showcmd_row,
-            sc_col + len, 0);
+  grid_puts(&msg_grid_adj, (char_u *)"          " + len, showcmd_row,
+            sc_col + len, HL_ATTR(HLF_MSG));
 
   grid_puts_line_flush(false);
 }
@@ -3928,11 +3932,11 @@ static bool nv_screengo(oparg_T *oap, int dir, long dist)
 
     while (dist--) {
       if (dir == BACKWARD) {
-        if ((long)curwin->w_curswant >= width2)
-          /* move back within line */
+        if (curwin->w_curswant > width2) {
+          // move back within line
           curwin->w_curswant -= width2;
-        else {
-          /* to previous line */
+        } else {
+          // to previous line
           if (curwin->w_cursor.lnum == 1) {
             retval = false;
             break;
@@ -4676,9 +4680,8 @@ static void nv_ctrlo(cmdarg_T *cap)
   }
 }
 
-/*
- * CTRL-^ command, short for ":e #"
- */
+// CTRL-^ command, short for ":e #".  Works even when the alternate buffer is
+// not named.
 static void nv_hat(cmdarg_T *cap)
 {
   if (!checkclearopq(cap->oap))
@@ -5123,14 +5126,10 @@ static void nv_right(cmdarg_T *cap)
       break;
     } else if (PAST_LINE) {
       curwin->w_set_curswant = true;
-      if (virtual_active())
+      if (virtual_active()) {
         oneright();
-      else {
-        if (has_mbyte)
-          curwin->w_cursor.col +=
-            (*mb_ptr2len)(get_cursor_pos_ptr());
-        else
-          ++curwin->w_cursor.col;
+      } else {
+        curwin->w_cursor.col += (*mb_ptr2len)(get_cursor_pos_ptr());
       }
     }
   }
@@ -6795,10 +6794,14 @@ static void nv_g_cmd(cmdarg_T *cap)
       } else if (nv_screengo(oap, FORWARD, cap->count1 - 1) == false)
         clearopbeep(oap);
     } else {
+      if (cap->count1 > 1) {
+        // if it fails, let the cursor still move to the last char
+        cursor_down(cap->count1 - 1, false);
+      }
       i = curwin->w_leftcol + curwin->w_width_inner - col_off - 1;
       coladvance((colnr_T)i);
 
-      /* Make sure we stick in this column. */
+      // Make sure we stick in this column.
       validate_virtcol();
       curwin->w_curswant = curwin->w_virtcol;
       curwin->w_set_curswant = false;
@@ -7506,6 +7509,23 @@ static void nv_esc(cmdarg_T *cap)
     restart_edit = 'a';
 }
 
+// Move the cursor for the "A" command.
+void set_cursor_for_append_to_line(void)
+{
+  curwin->w_set_curswant = true;
+  if (ve_flags == VE_ALL) {
+    const int save_State = State;
+
+    // Pretend Insert mode here to allow the cursor on the
+    // character past the end of the line
+    State = INSERT;
+    coladvance((colnr_T)MAXCOL);
+    State = save_State;
+  } else {
+    curwin->w_cursor.col += (colnr_T)STRLEN(get_cursor_pos_ptr());
+  }
+}
+
 /// Handle "A", "a", "I", "i" and <Insert> commands.
 static void nv_edit(cmdarg_T *cap)
 {
@@ -7527,18 +7547,8 @@ static void nv_edit(cmdarg_T *cap)
     clearop(cap->oap);
   } else if (!checkclearopq(cap->oap)) {
     switch (cap->cmdchar) {
-    case 'A':           /* "A"ppend after the line */
-      curwin->w_set_curswant = true;
-      if (ve_flags == VE_ALL) {
-        int save_State = State;
-
-        /* Pretend Insert mode here to allow the cursor on the
-         * character past the end of the line */
-        State = INSERT;
-        coladvance((colnr_T)MAXCOL);
-        State = save_State;
-      } else
-        curwin->w_cursor.col += (colnr_T)STRLEN(get_cursor_pos_ptr());
+    case 'A':           // "A"ppend after the line
+      set_cursor_for_append_to_line();
       break;
 
     case 'I':           /* "I"nsert before the first non-blank */

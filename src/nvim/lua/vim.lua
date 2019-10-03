@@ -157,6 +157,7 @@ end
 --- Return a human-readable representation of the given object.
 ---
 --@see https://github.com/kikito/inspect.lua
+--@see https://github.com/mpeterv/vinspect
 local function inspect(object, options)  -- luacheck: no unused
   error(object, options)  -- Stub for gen_vimdoc.py
 end
@@ -175,28 +176,30 @@ end
 --@returns false if client should cancel the paste.
 local function paste(lines, phase) end  -- luacheck: no unused
 paste = (function()
-  local tdots, tredraw, tick, got_line1 = 0, 0, 0, false
+  local tdots, tick, got_line1 = 0, 0, false
   return function(lines, phase)
     local call = vim.api.nvim_call_function
     local now = vim.loop.now()
     local mode = call('mode', {}):sub(1,1)
     if phase < 2 then  -- Reset flags.
-      tdots, tredraw, tick, got_line1 = now, now, 0, false
+      tdots, tick, got_line1 = now, 0, false
+    elseif mode ~= 'c' then
+      vim.api.nvim_command('undojoin')
     end
     if mode == 'c' and not got_line1 then  -- cmdline-mode: paste only 1 line.
       got_line1 = (#lines > 1)
       vim.api.nvim_set_option('paste', true)  -- For nvim_input().
-      local line1, _ = string.gsub(lines[1], '[\r\n\012\027]', ' ')
-      vim.api.nvim_input(line1)  -- Scrub "\r".
-    elseif mode == 'i' or mode == 'R' then
-      vim.api.nvim_put(lines, 'c', false, true)
-    else
-      vim.api.nvim_put(lines, 'c', true, true)
-    end
-    if (now - tredraw >= 1000) or phase == -1 or phase > 2 then
-      tredraw = now
-      vim.api.nvim_command('redraw')
-      vim.api.nvim_command('redrawstatus')
+      local line1 = lines[1]:gsub('<', '<lt>'):gsub('[\r\n\012\027]', ' ')  -- Scrub.
+      vim.api.nvim_input(line1)
+      vim.api.nvim_set_option('paste', false)
+    elseif mode ~= 'c' then  -- Else: discard remaining cmdline-mode chunks.
+      if phase < 2 and mode ~= 'i' and mode ~= 'R' and mode ~= 't' then
+        vim.api.nvim_put(lines, 'c', true, true)
+        -- XXX: Normal-mode: workaround bad cursor-placement after first chunk.
+        vim.api.nvim_command('normal! a')
+      else
+        vim.api.nvim_put(lines, 'c', false, true)
+      end
     end
     if phase ~= -1 and (now - tdots >= 100) then
       local dots = ('.'):rep(tick % 4)
@@ -207,16 +210,17 @@ paste = (function()
       vim.api.nvim_command(('echo "%s"'):format(dots))
     end
     if phase == -1 or phase == 3 then
-      vim.api.nvim_command('echo ""')
-      vim.api.nvim_set_option('paste', false)
+      vim.api.nvim_command('redraw'..(tick > 1 and '|echo ""' or ''))
     end
     return true  -- Paste will not continue if not returning `true`.
   end
 end)()
 
---- Defers the wrapped callback until the Nvim API is safe to call.
+--- Defers callback `cb` until the Nvim API is safe to call.
 ---
---@see |vim-loop-callbacks|
+---@see |lua-loop-callbacks|
+---@see |vim.schedule()|
+---@see |vim.in_fast_event()|
 local function schedule_wrap(cb)
   return (function (...)
     local args = {...}
@@ -228,6 +232,9 @@ local function __index(t, key)
   if key == 'inspect' then
     t.inspect = require('vim.inspect')
     return t.inspect
+  elseif key == 'treesitter' then
+    t.treesitter = require('vim.treesitter')
+    return t.treesitter
   elseif require('vim.shared')[key] ~= nil then
     -- Expose all `vim.shared` functions on the `vim` module.
     t[key] = require('vim.shared')[key]

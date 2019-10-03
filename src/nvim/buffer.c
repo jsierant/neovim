@@ -144,7 +144,7 @@ read_buffer(
     if (!readonlymode && !BUFEMPTY()) {
       changed();
     } else if (retval != FAIL) {
-      unchanged(curbuf, false);
+      unchanged(curbuf, false, true);
     }
 
     apply_autocmds_retval(EVENT_STDINREADPOST, NULL, NULL, false,
@@ -299,7 +299,7 @@ int open_buffer(
       || (aborting() && vim_strchr(p_cpo, CPO_INTMOD) != NULL)) {
     changed();
   } else if (retval != FAIL && !read_stdin && !read_fifo) {
-    unchanged(curbuf, false);
+    unchanged(curbuf, false, true);
   }
   save_file_ff(curbuf);                 // keep this fileformat
 
@@ -641,13 +641,11 @@ void close_buffer(win_T *win, buf_T *buf, int action, int abort_if_last)
   }
 }
 
-/*
- * Make buffer not contain a file.
- */
+/// Make buffer not contain a file.
 void buf_clear_file(buf_T *buf)
 {
   buf->b_ml.ml_line_count = 1;
-  unchanged(buf, true);
+  unchanged(buf, true, true);
   buf->b_p_eol = true;
   buf->b_start_eol = true;
   buf->b_p_bomb = false;
@@ -1018,8 +1016,9 @@ do_bufdel(
             break;
           }
           arg = p;
-        } else
-          bnr = getdigits_int(&arg);
+        } else {
+          bnr = getdigits_int(&arg, false, 0);
+        }
       }
     }
     if (!got_int && do_current
@@ -2654,8 +2653,7 @@ void buflist_list(exarg_T *eap)
         buf == curbuf ? (int64_t)curwin->w_cursor.lnum
                       : (int64_t)buflist_findlnum(buf));
     msg_outtrans(IObuff);
-    ui_flush();            // output one line at a time
-    os_breakcheck();
+    line_breakcheck();
   }
 }
 
@@ -3629,10 +3627,7 @@ int build_stl_str_hl(
 
     // The first digit group is the item's min width
     if (ascii_isdigit(*fmt_p)) {
-      minwid = getdigits_int(&fmt_p);
-      if (minwid < 0) {         // overflow
-        minwid = 0;
-      }
+      minwid = getdigits_int(&fmt_p, false, 0);
     }
 
     // User highlight groups override the min width field
@@ -3715,10 +3710,7 @@ int build_stl_str_hl(
     if (*fmt_p == '.') {
       fmt_p++;
       if (ascii_isdigit(*fmt_p)) {
-        maxwid = getdigits_int(&fmt_p);
-        if (maxwid <= 0) {              // overflow
-          maxwid = 50;
-        }
+        maxwid = getdigits_int(&fmt_p, false, 50);
       }
     }
 
@@ -5067,7 +5059,6 @@ chk_modeline(
   int retval = OK;
   char_u      *save_sourcing_name;
   linenr_T save_sourcing_lnum;
-  scid_T save_SID;
 
   prev = -1;
   for (s = ml_get(lnum); *s != NUL; s++) {
@@ -5082,7 +5073,7 @@ chk_modeline(
         } else {
           e = s + 3;
         }
-        if (getdigits_safe(&e, &vers) != OK) {
+        if (!try_getdigits(&e, &vers)) {
           continue;
         }
 
@@ -5155,15 +5146,17 @@ chk_modeline(
 
     if (*s != NUL) {                  // skip over an empty "::"
       const int secure_save = secure;
-      save_SID = current_SID;
-      current_SID = SID_MODELINE;
+      const sctx_T save_current_sctx = current_sctx;
+      current_sctx.sc_sid = SID_MODELINE;
+      current_sctx.sc_seq = 0;
+      current_sctx.sc_lnum = 0;
       // Make sure no risky things are executed as a side effect.
       secure = 1;
 
       retval = do_set(s, OPT_MODELINE | OPT_LOCAL | flags);
 
       secure = secure_save;
-      current_SID = save_SID;
+      current_sctx = save_current_sctx;
       if (retval == FAIL) {                   // stop if error found
         break;
       }
@@ -5184,6 +5177,13 @@ bool bt_help(const buf_T *const buf)
   FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT
 {
   return buf != NULL && buf->b_help;
+}
+
+// Return true if "buf" is a normal buffer, 'buftype' is empty.
+bool bt_normal(const buf_T *const buf)
+  FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT
+{
+  return buf != NULL && buf->b_p_bt[0] == NUL;
 }
 
 // Return true if "buf" is the quickfix buffer.
