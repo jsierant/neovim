@@ -1,4 +1,5 @@
 require('coxpcall')
+local busted = require('busted')
 local luv = require('luv')
 local lfs = require('lfs')
 local mpack = require('mpack')
@@ -28,15 +29,13 @@ local module = {
 }
 
 local start_dir = lfs.currentdir()
--- XXX: NVIM_PROG takes precedence, QuickBuild sets it.
 module.nvim_prog = (
-  os.getenv('NVIM_PROG')
-  or os.getenv('NVIM_PRG')
+  os.getenv('NVIM_PRG')
   or global_helpers.test_build_dir .. '/bin/nvim'
 )
 -- Default settings for the test session.
 module.nvim_set = (
-  'set shortmess+=IS background=light noswapfile noautoindent'
+  'set shortmess+=IS background=light noswapfile noautoindent startofline'
   ..' laststatus=1 undodir=. directory=. viewdir=. backupdir=.'
   ..' belloff= wildoptions-=pum noshowcmd noruler nomore redrawdebug=invalid')
 module.nvim_argv = {
@@ -187,7 +186,12 @@ function module.expect_msg_seq(...)
     if status then
       return result
     end
-    final_error = cat_err(final_error, result)
+    local message = result
+    if type(result) == "table" then
+      -- 'eq' returns several things
+      message = result.message
+    end
+    final_error = cat_err(final_error, message)
   end
   error(final_error)
 end
@@ -385,7 +389,7 @@ function module.retry(max, max_ms, fn)
     end
     luv.update_time()  -- Update cached value of luv.now() (libuv: uv_now()).
     if (max and tries >= max) or (luv.now() - start_time > timeout) then
-      error("\nretry() attempts: "..tostring(tries).."\n"..tostring(result))
+      busted.fail(string.format("retry() attempts: %d\n%s", tries, tostring(result)), 2)
     end
     tries = tries + 1
     luv.sleep(20)  -- Avoid hot loop...
@@ -437,6 +441,7 @@ function module.new_argv(...)
         'NVIM_LOG_FILE',
         'NVIM_RPLUGIN_MANIFEST',
         'GCOV_ERROR_FILE',
+        'TMPDIR',
       }) do
         if not env_tbl[k] then
           env_tbl[k] = os.getenv(k)
@@ -499,10 +504,21 @@ function module.source(code)
   return fname
 end
 
+function module.has_powershell()
+  return module.eval('executable("'..(iswin() and 'powershell' or 'pwsh')..'")') == 1
+end
+
 function module.set_shell_powershell()
+  local shell = iswin() and 'powershell' or 'pwsh'
+  assert(module.has_powershell())
+  local cmd = 'Remove-Item -Force '..table.concat(iswin()
+    and {'alias:cat', 'alias:echo', 'alias:sleep'}
+    or  {'alias:echo'}, ',')..';'
   module.source([[
-    set shell=powershell shellquote=( shellpipe=\| shellredir=> shellxquote=
-    let &shellcmdflag = '-NoLogo -NoProfile -ExecutionPolicy RemoteSigned -Command Remove-Item -Force alias:sleep; Remove-Item -Force alias:cat;'
+    let &shell = ']]..shell..[['
+    set shellquote= shellpipe=\| shellxquote=
+    let &shellredir = '| Out-File -Encoding UTF8'
+    let &shellcmdflag = '-NoLogo -NoProfile -ExecutionPolicy RemoteSigned -Command ]]..cmd..[['
   ]])
 end
 
@@ -543,6 +559,11 @@ function module.wait()
   session:request('nvim_eval', '1')
 end
 
+function module.buf_lines(bufnr)
+  return module.exec_lua("return vim.api.nvim_buf_get_lines((...), 0, -1, false)", bufnr)
+end
+
+--@see buf_lines()
 function module.curbuf_contents()
   module.wait()  -- Before inspecting the buffer, process all input.
   return table.concat(module.curbuf('get_lines', 0, -1, true), '\n')
@@ -699,7 +720,7 @@ module.curwinmeths = module.create_callindex(module.curwin)
 module.curtabmeths = module.create_callindex(module.curtab)
 
 function module.exec_lua(code, ...)
-  return module.meths.execute_lua(code, {...})
+  return module.meths.exec_lua(code, {...})
 end
 
 function module.redir_exec(cmd)

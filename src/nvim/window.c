@@ -70,8 +70,8 @@ static char *m_onlyone = N_("Already only one window");
 /*
  * all CTRL-W window commands are handled here, called from normal_cmd().
  */
-void 
-do_window (
+void
+do_window(
     int nchar,
     long Prenum,
     int xchar                  /* extra char from ":wincmd gx" or NUL */
@@ -85,10 +85,7 @@ do_window (
   size_t len;
   char cbuf[40];
 
-  if (Prenum == 0)
-    Prenum1 = 1;
-  else
-    Prenum1 = Prenum;
+  Prenum1 = Prenum == 0 ? 1 : Prenum;
 
 # define CHECK_CMDWIN \
   do { \
@@ -519,11 +516,22 @@ wingotofile:
       do_nv_ident('g', xchar);
       break;
 
+    case TAB:
+      goto_tabpage_lastused();
+      break;
+
     case 'f':                       /* CTRL-W gf: "gf" in a new tab page */
     case 'F':                       /* CTRL-W gF: "gF" in a new tab page */
       cmdmod.tab = tabpage_index(curtab) + 1;
       nchar = xchar;
       goto wingotofile;
+    case 't':                       // CTRL-W gt: go to next tab page
+      goto_tabpage((int)Prenum);
+      break;
+
+    case 'T':                       // CTRL-W gT: go to previous tab page
+      goto_tabpage(-(int)Prenum1);
+      break;
 
     case 'e':
       if (curwin->w_floating || !ui_has(kUIMultigrid)) {
@@ -632,6 +640,12 @@ void win_set_minimal_style(win_T *wp)
   if (wp->w_p_scl[0] != 'a') {
     xfree(wp->w_p_scl);
     wp->w_p_scl = (char_u *)xstrdup("auto");
+  }
+
+  // colorcolumn: cleared
+  if (wp->w_p_cc != NULL && *wp->w_p_cc != NUL) {
+    xfree(wp->w_p_cc);
+    wp->w_p_cc = (char_u *)xstrdup("");
   }
 }
 
@@ -1530,17 +1544,22 @@ static void win_init(win_T *newp, win_T *oldp, int flags)
     /* Don't copy the location list.  */
     newp->w_llist = NULL;
     newp->w_llist_ref = NULL;
-  } else
-    copy_loclist(oldp, newp);
+  } else {
+    copy_loclist_stack(oldp, newp);
+  }
   newp->w_localdir = (oldp->w_localdir == NULL)
                      ? NULL : vim_strsave(oldp->w_localdir);
 
   /* copy tagstack and folds */
   for (i = 0; i < oldp->w_tagstacklen; i++) {
-    newp->w_tagstack[i] = oldp->w_tagstack[i];
-    if (newp->w_tagstack[i].tagname != NULL)
-      newp->w_tagstack[i].tagname =
-        vim_strsave(newp->w_tagstack[i].tagname);
+    taggy_T *tag = &newp->w_tagstack[i];
+    *tag = oldp->w_tagstack[i];
+    if (tag->tagname != NULL) {
+      tag->tagname = vim_strsave(tag->tagname);
+    }
+    if (tag->user_data != NULL) {
+      tag->user_data = vim_strsave(tag->user_data);
+    }
   }
   newp->w_tagstackidx = oldp->w_tagstackidx;
   newp->w_tagstacklen = oldp->w_tagstacklen;
@@ -1570,7 +1589,7 @@ static void win_init_some(win_T *newp, win_T *oldp)
 /// Check if "win" is a pointer to an existing window in the current tabpage.
 ///
 /// @param  win  window to check
-bool win_valid(win_T *win) FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT
+bool win_valid(const win_T *win) FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT
 {
   if (win == NULL) {
     return false;
@@ -2413,6 +2432,7 @@ int win_close(win_T *win, bool free_buf)
   bool help_window = false;
   tabpage_T   *prev_curtab = curtab;
   frame_T *win_frame = win->w_floating ? NULL : win->w_frame->fr_parent;
+  const bool had_diffmode = win->w_p_diff;
 
   if (last_window() && !win->w_floating) {
     EMSG(_("E444: Cannot close last window"));
@@ -2636,6 +2656,22 @@ int win_close(win_T *win, bool free_buf)
    * before it was opened. */
   if (help_window)
     restore_snapshot(SNAP_HELP_IDX, close_curwin);
+
+  // If the window had 'diff' set and now there is only one window left in
+  // the tab page with 'diff' set, and "closeoff" is in 'diffopt', then
+  // execute ":diffoff!".
+  if (diffopt_closeoff() && had_diffmode && curtab == prev_curtab) {
+    int diffcount = 0;
+
+    FOR_ALL_WINDOWS_IN_TAB(dwin, curtab) {
+      if (dwin->w_p_diff) {
+        diffcount++;
+      }
+    }
+    if (diffcount == 1) {
+      do_cmdline_cmd("diffoff!");
+    }
+  }
 
   curwin->w_pos_changed = true;
   redraw_all_later(NOT_VALID);
@@ -3663,6 +3699,10 @@ void free_tabpage(tabpage_T *tp)
   hash_init(&tp->tp_vars->dv_hashtab);
   unref_var_dict(tp->tp_vars);
 
+  if (tp == lastused_tabpage) {
+    lastused_tabpage = NULL;
+  }
+
   xfree(tp->tp_localdir);
   xfree(tp);
 }
@@ -3721,6 +3761,8 @@ int win_new_tabpage(int after, char_u *filename)
     redraw_all_later(NOT_VALID);
 
     tabpage_check_windows(tp);
+
+    lastused_tabpage = tp;
 
     apply_autocmds(EVENT_WINNEW, NULL, NULL, false, curbuf);
     apply_autocmds(EVENT_WINENTER, NULL, NULL, false, curbuf);
@@ -3948,6 +3990,7 @@ static void enter_tabpage(tabpage_T *tp, buf_T *old_curbuf, int trigger_enter_au
   if (curtab->tp_old_Columns != Columns && starting == 0)
     shell_new_columns();        /* update window widths */
 
+  lastused_tabpage = old_curtab;
 
   /* Apply autocommands after updating the display, when 'rows' and
    * 'columns' have been set correctly. */
@@ -4064,6 +4107,15 @@ void goto_tabpage_tp(tabpage_T *tp, int trigger_enter_autocmds, int trigger_leav
     else
       enter_tabpage(curtab, curbuf, trigger_enter_autocmds,
           trigger_leave_autocmds);
+  }
+}
+
+// Go to the last accessed tab page, if there is one.
+void goto_tabpage_lastused(void)
+{
+  int index = tabpage_index(lastused_tabpage);
+  if (index < tabpage_index(NULL)) {
+    goto_tabpage(index);
   }
 }
 
@@ -4344,9 +4396,10 @@ static void win_goto_hor(bool left, long count)
   }
 }
 
-/*
- * Make window "wp" the current window.
- */
+/// Make window `wp` the current window.
+///
+/// @warning Autocmds may close the window immediately, so caller must check
+///          win_valid(wp).
 void win_enter(win_T *wp, bool undo_sync)
 {
   win_enter_ext(wp, undo_sync, false, false, true, true);
@@ -4638,8 +4691,10 @@ win_free (
 
   xfree(wp->w_lines);
 
-  for (i = 0; i < wp->w_tagstacklen; ++i)
+  for (i = 0; i < wp->w_tagstacklen; i++) {
     xfree(wp->w_tagstack[i].tagname);
+    xfree(wp->w_tagstack[i].user_data);
+  }
 
   xfree(wp->w_localdir);
 
@@ -5989,10 +6044,20 @@ file_name_in_line (
 
   if (file_lnum != NULL) {
     char_u *p;
+    const char *line_english = " line ";
+    const char *line_transl = _(line_msg);
 
     // Get the number after the file name and a separator character.
+    // Also accept " line 999" with and without the same translation as
+    // used in last_set_msg().
     p = ptr + len;
-    p = skipwhite(p);
+    if (STRNCMP(p, line_english, STRLEN(line_english)) == 0) {
+      p += STRLEN(line_english);
+    } else if (STRNCMP(p, line_transl, STRLEN(line_transl)) == 0) {
+      p += STRLEN(line_transl);
+    } else {
+      p = skipwhite(p);
+    }
     if (*p != NUL) {
       if (!isdigit(*p)) {
         p++;                        // skip the separator
@@ -6581,7 +6646,7 @@ int match_add(win_T *wp, const char *const grp, const char *const pat,
     prev->next = m;
   m->next = cur;
 
-  redraw_later(rtype);
+  redraw_win_later(wp, rtype);
   return id;
 
 fail:
@@ -6639,7 +6704,7 @@ int match_delete(win_T *wp, int id, int perr)
     rtype = VALID;
   }
   xfree(cur);
-  redraw_later(rtype);
+  redraw_win_later(wp, rtype);
   return 0;
 }
 
@@ -6657,7 +6722,7 @@ void clear_matches(win_T *wp)
     xfree(wp->w_match_head);
     wp->w_match_head = m;
   }
-  redraw_later(SOME_VALID);
+  redraw_win_later(wp, SOME_VALID);
 }
 
 /*

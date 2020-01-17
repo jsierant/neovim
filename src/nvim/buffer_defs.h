@@ -42,6 +42,8 @@ typedef struct {
 #include "nvim/map.h"
 // for kvec
 #include "nvim/lib/kvec.h"
+// for marktree
+#include "nvim/marktree.h"
 
 #define GETFILE_SUCCESS(x)    ((x) <= 0)
 #define MODIFIABLE(buf) (buf->b_p_ma)
@@ -109,8 +111,6 @@ typedef uint16_t disptick_T;  // display tick type
 #include "nvim/syntax_defs.h"
 // for signlist_T
 #include "nvim/sign_defs.h"
-// for bufhl_*_T
-#include "nvim/bufhl_defs.h"
 
 #include "nvim/os/fs_defs.h"    // for FileID
 #include "nvim/terminal.h"      // for Terminal
@@ -119,10 +119,11 @@ typedef uint16_t disptick_T;  // display tick type
  * The taggy struct is used to store the information about a :tag command.
  */
 typedef struct taggy {
-  char_u      *tagname;         /* tag name */
-  fmark_T fmark;                /* cursor position BEFORE ":tag" */
-  int cur_match;                /* match number */
-  int cur_fnum;                 /* buffer number used for cur_match */
+  char_u      *tagname;         // tag name
+  fmark_T fmark;                // cursor position BEFORE ":tag"
+  int cur_match;                // match number
+  int cur_fnum;                 // buffer number used for cur_match
+  char_u *user_data;            // used with tagfunc
 } taggy_T;
 
 typedef struct buffblock buffblock_T;
@@ -457,11 +458,15 @@ typedef TV_DICTITEM_STRUCT(sizeof("changedtick")) ChangedtickDictItem;
 
 typedef struct {
   LuaRef on_lines;
+  LuaRef on_bytes;
   LuaRef on_changedtick;
   LuaRef on_detach;
   bool utf_sizes;
 } BufUpdateCallbacks;
-#define BUF_UPDATE_CALLBACKS_INIT { LUA_NOREF, LUA_NOREF, LUA_NOREF, false }
+#define BUF_UPDATE_CALLBACKS_INIT { LUA_NOREF, LUA_NOREF, LUA_NOREF, \
+                                    LUA_NOREF, false }
+
+EXTERN int curbuf_splice_pending INIT(= 0);
 
 #define BUF_HAS_QF_ENTRY 1
 #define BUF_HAS_LL_ENTRY 2
@@ -647,6 +652,7 @@ struct file_buffer {
   char_u *b_p_cpt;              ///< 'complete'
   char_u *b_p_cfu;              ///< 'completefunc'
   char_u *b_p_ofu;              ///< 'omnifunc'
+  char_u *b_p_tfu;              ///< 'tagfunc'
   int b_p_eol;                  ///< 'endofline'
   int b_p_fixeol;               ///< 'fixendofline'
   int b_p_et;                   ///< 'expandtab'
@@ -799,9 +805,9 @@ struct file_buffer {
 
   int b_mapped_ctrl_c;          // modes where CTRL-C is mapped
 
-  BufhlInfo b_bufhl_info;       // buffer stored highlights
-
-  kvec_t(BufhlLine *) b_bufhl_move_space;  // temporary space for highlights
+  MarkTree b_marktree[1];
+  Map(uint64_t, ExtmarkItem) *b_extmark_index;
+  Map(uint64_t, ExtmarkNs) *b_extmark_ns;         // extmark namespaces
 
   // array of channel_id:s which have asked to receive updates for this
   // buffer.
@@ -822,6 +828,12 @@ struct file_buffer {
 
   // The number for times the current line has been flushed in the memline.
   int flush_count;
+
+  bool b_luahl;
+  LuaRef b_luahl_start;
+  LuaRef b_luahl_window;
+  LuaRef b_luahl_line;
+  LuaRef b_luahl_end;
 
   int b_diff_failed;    // internal diff failed for this buffer
 };
@@ -909,19 +921,19 @@ typedef struct w_line {
  * or row (FR_ROW) layout or is a leaf, which has a window.
  */
 struct frame_S {
-  char fr_layout;               /* FR_LEAF, FR_COL or FR_ROW */
+  char fr_layout;               // FR_LEAF, FR_COL or FR_ROW
   int fr_width;
-  int fr_newwidth;              /* new width used in win_equal_rec() */
+  int fr_newwidth;              // new width used in win_equal_rec()
   int fr_height;
-  int fr_newheight;             /* new height used in win_equal_rec() */
-  frame_T     *fr_parent;       /* containing frame or NULL */
-  frame_T     *fr_next;         /* frame right or below in same parent, NULL
-                                   for first */
-  frame_T     *fr_prev;         /* frame left or above in same parent, NULL
-                                   for last */
-  /* fr_child and fr_win are mutually exclusive */
-  frame_T     *fr_child;        /* first contained frame */
-  win_T       *fr_win;          /* window that fills this frame */
+  int fr_newheight;             // new height used in win_equal_rec()
+  frame_T     *fr_parent;       // containing frame or NULL
+  frame_T     *fr_next;         // frame right or below in same parent, NULL
+                                // for last
+  frame_T     *fr_prev;         // frame left or above in same parent, NULL
+                                // for first
+  // fr_child and fr_win are mutually exclusive
+  frame_T     *fr_child;        // first contained frame
+  win_T       *fr_win;          // window that fills this frame
 };
 
 #define FR_LEAF 0       /* frame is a leaf */
@@ -1111,6 +1123,9 @@ struct window_S {
     int stlnc;
     int vert;
     int fold;
+    int foldopen;                    ///< when fold is open
+    int foldclosed;                  ///< when fold is closed
+    int foldsep;                     ///< continuous fold marker
     int diff;
     int msgsep;
     int eob;

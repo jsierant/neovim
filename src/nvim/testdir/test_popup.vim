@@ -733,15 +733,38 @@ func Test_popup_and_preview_autocommand()
   bw!
 endfunc
 
-func Test_popup_position()
+func Test_popup_and_previewwindow_dump()
   if !CanRunVimInTerminal()
     return
   endif
   call writefile([
-	\ '123456789_123456789_123456789_a',
-	\ '123456789_123456789_123456789_b',
-	\ '            123',
-	\ ], 'Xtest')
+    \ 'set previewheight=9',
+    \ 'silent! pedit',
+    \ 'call setline(1, map(repeat(["ab"], 10), "v:val. v:key"))',
+    \ 'exec "norm! G\<C-E>\<C-E>"',
+	\ ], 'Xscript')
+  let buf = RunVimInTerminal('-S Xscript', {})
+
+  " Test that popup and previewwindow do not overlap.
+  call term_sendkeys(buf, "o\<C-X>\<C-N>")
+  sleep 100m
+  call VerifyScreenDump(buf, 'Test_popup_and_previewwindow_01', {})
+
+  call term_sendkeys(buf, "\<Esc>u")
+  call StopVimInTerminal(buf)
+  call delete('Xscript')
+endfunc
+
+func Test_popup_position()
+  if !CanRunVimInTerminal()
+    return
+  endif
+  let lines =<< trim END
+    123456789_123456789_123456789_a
+    123456789_123456789_123456789_b
+                123
+  END
+  call writefile(lines, 'Xtest')
   let buf = RunVimInTerminal('Xtest', {})
   call term_sendkeys(buf, ":vsplit\<CR>")
 
@@ -761,6 +784,15 @@ func Test_popup_position()
   call term_sendkeys(buf, "GA\<C-N>")
   call VerifyScreenDump(buf, 'Test_popup_position_03', {'rows': 8})
 
+  " completed text wider than the window and 'pumwidth' smaller than available
+  " space
+  call term_sendkeys(buf, "\<Esc>u")
+  call term_sendkeys(buf, ":set pumwidth=20\<CR>")
+  call term_sendkeys(buf, "ggI123456789_\<Esc>")
+  call term_sendkeys(buf, "jI123456789_\<Esc>")
+  call term_sendkeys(buf, "GA\<C-N>")
+  call VerifyScreenDump(buf, 'Test_popup_position_04', {'rows': 10})
+  
   call term_sendkeys(buf, "\<Esc>u")
   call StopVimInTerminal(buf)
   call delete('Xtest')
@@ -917,6 +949,20 @@ func Test_popup_complete_info_02()
   bwipe!
 endfunc
 
+func Test_popup_complete_info_no_pum()
+  new
+  call assert_false( pumvisible() )
+  let no_pum_info = complete_info()
+  let d = {
+        \   'mode': '',
+        \   'pum_visible': 0,
+        \   'items': [],
+        \   'selected': -1,
+        \  }
+  call assert_equal( d, complete_info() )
+  bwipe!
+endfunc
+
 func Test_CompleteChanged()
   new
   call setline(1, ['foo', 'bar', 'foobar', ''])
@@ -949,6 +995,34 @@ func Test_CompleteChanged()
   set complete& completeopt&
   delfunc! OnPumchange
   bw!
+endfunc
+
+function! GetPumPosition()
+  call assert_true( pumvisible() )
+  let g:pum_pos = pum_getpos()
+  return ''
+endfunction
+
+func Test_pum_getpos()
+  new
+  inoremap <buffer><F5> <C-R>=GetPumPosition()<CR>
+  setlocal completefunc=UserDefinedComplete
+
+   let d = {
+    \   'height':    5,
+    \   'width':     15,
+    \   'row':       1,
+    \   'col':       0,
+    \   'size':      5,
+    \   'scrollbar': v:false,
+    \ }
+  call feedkeys("i\<C-X>\<C-U>\<F5>", 'tx')
+  call assert_equal(d, g:pum_pos)
+
+  call assert_false( pumvisible() )
+  call assert_equal( {}, pum_getpos() )
+  bw!
+  unlet g:pum_pos
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

@@ -2460,11 +2460,8 @@ update_si_end(
     int force                  /* when TRUE overrule a previous end */
 )
 {
-  lpos_T startpos;
-  lpos_T endpos;
   lpos_T hl_endpos;
   lpos_T end_endpos;
-  int end_idx;
 
   /* return quickly for a keyword */
   if (sip->si_idx < 0)
@@ -2480,9 +2477,12 @@ update_si_end(
    * We need to find the end of the region.  It may continue in the next
    * line.
    */
-  end_idx = 0;
-  startpos.lnum = current_lnum;
-  startpos.col = startcol;
+  int end_idx = 0;
+  lpos_T startpos = {
+    .lnum = current_lnum,
+    .col = startcol,
+  };
+  lpos_T endpos = { 0 };
   find_endpos(sip->si_idx, &startpos, &endpos, &hl_endpos,
       &(sip->si_flags), &end_endpos, &end_idx, sip->si_extmatch);
 
@@ -5959,6 +5959,7 @@ static const char *highlight_init_both[] = {
   "IncSearch    cterm=reverse gui=reverse",
   "ModeMsg      cterm=bold gui=bold",
   "NonText      ctermfg=Blue gui=bold guifg=Blue",
+  "Normal       cterm=NONE gui=NONE",
   "PmenuSbar    ctermbg=Grey guibg=Grey",
   "StatusLine   cterm=reverse,bold gui=reverse,bold",
   "StatusLineNC cterm=reverse gui=reverse",
@@ -6010,7 +6011,6 @@ static const char *highlight_init_light[] = {
   "Title        ctermfg=DarkMagenta gui=bold guifg=Magenta",
   "Visual       guibg=LightGrey",
   "WarningMsg   ctermfg=DarkRed guifg=Red",
-  "Normal       gui=NONE",
   NULL
 };
 
@@ -6044,7 +6044,6 @@ static const char *highlight_init_dark[] = {
   "Title        ctermfg=LightMagenta gui=bold guifg=Magenta",
   "Visual       guibg=DarkGrey",
   "WarningMsg   ctermfg=LightRed guifg=Red",
-  "Normal       gui=NONE",
   NULL
 };
 
@@ -7316,7 +7315,7 @@ static void set_hl_attr(int idx)
 
   sgp->sg_attr = hl_get_syn_attr(idx+1, at_en);
 
-  // a cursor style uses this syn_id, make sure its atribute is updated.
+  // a cursor style uses this syn_id, make sure its attribute is updated.
   if (cursor_mode_uses_syn_id(idx+1)) {
     ui_mode_info_set();
   }

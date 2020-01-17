@@ -228,20 +228,25 @@ int msg_attr(const char *s, const int attr)
 }
 
 /// similar to msg_outtrans_attr, but support newlines and tabs.
-void msg_multiline_attr(const char *s, int attr, bool check_int)
+void msg_multiline_attr(const char *s, int attr,
+                        bool check_int, bool *need_clear)
   FUNC_ATTR_NONNULL_ALL
 {
   const char *next_spec = s;
 
-  while (next_spec != NULL && (!check_int || !got_int)) {
+  while (next_spec != NULL) {
+    if (check_int && got_int) {
+      return;
+    }
     next_spec = strpbrk(s, "\t\n\r");
 
     if (next_spec != NULL) {
       // Printing all char that are before the char found by strpbrk
-      msg_outtrans_len_attr((char_u *)s, next_spec - s, attr);
+      msg_outtrans_len_attr((const char_u *)s, next_spec - s, attr);
 
-      if (*next_spec != TAB) {
+      if (*next_spec != TAB && *need_clear) {
         msg_clr_eos();
+        *need_clear = false;
       }
       msg_putchar_attr((uint8_t)(*next_spec), attr);
       s = next_spec + 1;
@@ -253,6 +258,7 @@ void msg_multiline_attr(const char *s, int attr, bool check_int)
   if (*s != NUL) {
     msg_outtrans_attr((char_u *)s, attr);
   }
+  return;
 }
 
 
@@ -311,12 +317,15 @@ bool msg_attr_keep(char_u *s, int attr, bool keep, bool multiline)
   if (buf != NULL)
     s = buf;
 
+  bool need_clear = true;
   if (multiline) {
-    msg_multiline_attr((char *)s, attr, false);
+    msg_multiline_attr((char *)s, attr, false, &need_clear);
   } else {
     msg_outtrans_attr(s, attr);
   }
-  msg_clr_eos();
+  if (need_clear) {
+    msg_clr_eos();
+  }
   retval = msg_end();
 
   if (keep && retval && vim_strsize(s) < (int)(Rows - cmdline_row - 1)
@@ -1375,7 +1384,7 @@ static void msg_home_replace_attr(char_u *fname, int attr)
 
 /*
  * Output 'len' characters in 'str' (including NULs) with translation
- * if 'len' is -1, output upto a NUL character.
+ * if 'len' is -1, output up to a NUL character.
  * Use attributes 'attr'.
  * Return the number of characters it takes on the screen.
  */
@@ -1384,12 +1393,12 @@ int msg_outtrans(char_u *str)
   return msg_outtrans_attr(str, 0);
 }
 
-int msg_outtrans_attr(char_u *str, int attr)
+int msg_outtrans_attr(const char_u *str, int attr)
 {
   return msg_outtrans_len_attr(str, (int)STRLEN(str), attr);
 }
 
-int msg_outtrans_len(char_u *str, int len)
+int msg_outtrans_len(const char_u *str, int len)
 {
   return msg_outtrans_len_attr(str, len, 0);
 }
@@ -1402,7 +1411,7 @@ char_u *msg_outtrans_one(char_u *p, int attr)
 {
   int l;
 
-  if (has_mbyte && (l = (*mb_ptr2len)(p)) > 1) {
+  if ((l = utfc_ptr2len(p)) > 1) {
     msg_outtrans_len_attr(p, l, attr);
     return p + l;
   }
@@ -1410,7 +1419,7 @@ char_u *msg_outtrans_one(char_u *p, int attr)
   return p + 1;
 }
 
-int msg_outtrans_len_attr(char_u *msgstr, int len, int attr)
+int msg_outtrans_len_attr(const char_u *msgstr, int len, int attr)
 {
   int retval = 0;
   const char *str = (const char *)msgstr;
@@ -1498,7 +1507,7 @@ void msg_make(char_u *arg)
   }
 }
 
-/// Output the string 'str' upto a NUL character.
+/// Output the string 'str' up to a NUL character.
 /// Return the number of characters it takes on the screen.
 ///
 /// If K_SPECIAL is encountered, then it is taken in conjunction with the

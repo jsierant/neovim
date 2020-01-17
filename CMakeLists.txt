@@ -125,29 +125,27 @@ set(NVIM_VERSION_PATCH 0)
 set(NVIM_VERSION_PRERELEASE "-dev") # for package maintainers
 
 # API level
-set(NVIM_API_LEVEL 6)         # Bump this after any API change.
+set(NVIM_API_LEVEL 7)         # Bump this after any API change.
 set(NVIM_API_LEVEL_COMPAT 0)  # Adjust this after a _breaking_ API change.
-set(NVIM_API_PRERELEASE false)
+set(NVIM_API_PRERELEASE true)
 
 set(NVIM_VERSION_BUILD_TYPE "${CMAKE_BUILD_TYPE}")
 # NVIM_VERSION_CFLAGS set further below.
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Minimize logging for release-type builds.
-if(NOT CMAKE_C_FLAGS_RELEASE MATCHES DMIN_LOG_LEVEL)
-  set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -DMIN_LOG_LEVEL=3")
-endif()
-if(NOT CMAKE_C_FLAGS_MINSIZEREL MATCHES DMIN_LOG_LEVEL)
-  set(CMAKE_C_FLAGS_MINSIZEREL "${CMAKE_C_FLAGS_MINSIZEREL} -DMIN_LOG_LEVEL=3")
-endif()
-if(NOT CMAKE_C_FLAGS_RELWITHDEBINFO MATCHES DMIN_LOG_LEVEL)
-  set(CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELWITHDEBINFO} -DMIN_LOG_LEVEL=3")
-endif()
-
 # Log level (MIN_LOG_LEVEL in log.h)
 if("${MIN_LOG_LEVEL}" MATCHES "^$")
-  message(STATUS "MIN_LOG_LEVEL not specified, default is 1 (INFO)")
+  # Minimize logging for release-type builds.
+  if(CMAKE_BUILD_TYPE STREQUAL "Release"
+      OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo"
+      OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
+    message(STATUS "MIN_LOG_LEVEL not specified, default is 3 (ERROR) for release builds")
+    set(MIN_LOG_LEVEL 3)
+  else()
+    message(STATUS "MIN_LOG_LEVEL not specified, default is 1 (INFO)")
+    set(MIN_LOG_LEVEL 1)
+  endif()
 else()
   if(NOT MIN_LOG_LEVEL MATCHES "^[0-3]$")
     message(FATAL_ERROR "invalid MIN_LOG_LEVEL: " ${MIN_LOG_LEVEL})
@@ -303,8 +301,10 @@ if(UNIX)
 
   if(HAS_FSTACK_PROTECTOR_STRONG_FLAG)
     add_compile_options(-fstack-protector-strong)
+    link_libraries(-fstack-protector-strong)
   elseif(HAS_FSTACK_PROTECTOR_FLAG)
     add_compile_options(-fstack-protector --param ssp-buffer-size=4)
+    link_libraries(-fstack-protector --param ssp-buffer-size=4)
   endif()
 endif()
 
@@ -317,10 +317,10 @@ if(HAS_DIAG_COLOR_FLAG)
   endif()
 endif()
 
-option(TRAVIS_CI_BUILD "Travis/QuickBuild CI, extra flags will be set" OFF)
+option(TRAVIS_CI_BUILD "Travis/sourcehut CI, extra flags will be set" OFF)
 
 if(TRAVIS_CI_BUILD)
-  message(STATUS "Travis/QuickBuild CI build enabled")
+  message(STATUS "Travis/sourcehut CI build enabled")
   add_compile_options(-Werror)
   if(DEFINED ENV{BUILD_32BIT})
     # Get some test coverage for unsigned char
@@ -487,18 +487,19 @@ include(LuaHelpers)
 set(LUA_DEPENDENCIES lpeg mpack bit)
 if(NOT LUA_PRG)
   foreach(CURRENT_LUA_PRG luajit lua5.1 lua5.2 lua)
-    # If LUA_PRG is set find_program() will not search
-    unset(LUA_PRG CACHE)
+    unset(_CHECK_LUA_PRG CACHE)
     unset(LUA_PRG_WORKS)
-    find_program(LUA_PRG ${CURRENT_LUA_PRG})
+    find_program(_CHECK_LUA_PRG ${CURRENT_LUA_PRG})
 
-    if(LUA_PRG)
-      check_lua_deps(${LUA_PRG} "${LUA_DEPENDENCIES}" LUA_PRG_WORKS)
+    if(_CHECK_LUA_PRG)
+      check_lua_deps(${_CHECK_LUA_PRG} "${LUA_DEPENDENCIES}" LUA_PRG_WORKS)
       if(LUA_PRG_WORKS)
+        set(LUA_PRG "${_CHECK_LUA_PRG}" CACHE FILEPATH "Path to a program.")
         break()
       endif()
     endif()
   endforeach()
+  unset(_CHECK_LUA_PRG CACHE)
 else()
   check_lua_deps(${LUA_PRG} "${LUA_DEPENDENCIES}" LUA_PRG_WORKS)
 endif()
@@ -561,10 +562,7 @@ if(BUSTED_PRG)
   endif()
 
   set(UNITTEST_PREREQS nvim-test unittest-headers)
-  set(FUNCTIONALTEST_PREREQS nvim printargs-test shell-test streams-test ${GENERATED_HELP_TAGS})
-  if(NOT WIN32)
-    list(APPEND FUNCTIONALTEST_PREREQS tty-test)
-  endif()
+  set(FUNCTIONALTEST_PREREQS nvim printenv-test printargs-test shell-test streams-test tty-test ${GENERATED_HELP_TAGS})
   set(BENCHMARK_PREREQS nvim tty-test)
 
   # Useful for automated build systems, if they want to manually run the tests.

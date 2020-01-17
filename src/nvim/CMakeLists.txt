@@ -52,7 +52,8 @@ set(UNICODE_TABLES_GENERATOR ${GENERATOR_DIR}/gen_unicode_tables.lua)
 set(UNICODE_DIR ${PROJECT_SOURCE_DIR}/unicode)
 set(GENERATED_UNICODE_TABLES ${GENERATED_DIR}/unicode_tables.generated.h)
 set(VIM_MODULE_FILE ${GENERATED_DIR}/lua/vim_module.generated.h)
-set(VIM_MODULE_SOURCE ${PROJECT_SOURCE_DIR}/src/nvim/lua/vim.lua)
+set(LUA_VIM_MODULE_SOURCE ${PROJECT_SOURCE_DIR}/src/nvim/lua/vim.lua)
+set(LUA_SHARED_MODULE_SOURCE ${PROJECT_SOURCE_DIR}/runtime/lua/vim/shared.lua)
 set(CHAR_BLOB_GENERATOR ${GENERATOR_DIR}/gen_char_blob.lua)
 set(LINT_SUPPRESS_FILE ${PROJECT_BINARY_DIR}/errors.json)
 set(LINT_SUPPRESS_URL_BASE "https://raw.githubusercontent.com/neovim/doc/gh-pages/reports/clint")
@@ -131,6 +132,12 @@ foreach(sfile ${NVIM_SOURCES})
     list(APPEND to_remove ${sfile})
   endif()
   if(NOT WIN32 AND ${f} MATCHES "^(pty_process_win.c)$")
+    list(APPEND to_remove ${sfile})
+  endif()
+  if(NOT WIN32 AND ${f} MATCHES "^(pty_conpty_win.c)$")
+    list(APPEND to_remove ${sfile})
+  endif()
+  if(NOT WIN32 AND ${f} MATCHES "^(os_win_console.c)$")
     list(APPEND to_remove ${sfile})
   endif()
 endforeach()
@@ -317,11 +324,13 @@ add_custom_command(
 
 add_custom_command(
   OUTPUT ${VIM_MODULE_FILE}
-  COMMAND ${LUA_PRG} ${CHAR_BLOB_GENERATOR} ${VIM_MODULE_SOURCE}
-                     ${VIM_MODULE_FILE} vim_module
+  COMMAND ${LUA_PRG} ${CHAR_BLOB_GENERATOR} ${VIM_MODULE_FILE}
+      ${LUA_VIM_MODULE_SOURCE} vim_module
+      ${LUA_SHARED_MODULE_SOURCE} shared_module
   DEPENDS
     ${CHAR_BLOB_GENERATOR}
-    ${VIM_MODULE_SOURCE}
+    ${LUA_VIM_MODULE_SOURCE}
+    ${LUA_SHARED_MODULE_SOURCE}
 )
 
 list(APPEND NVIM_GENERATED_SOURCES
@@ -419,6 +428,7 @@ if(Iconv_LIBRARIES)
 endif()
 
 if(WIN32)
+  list(APPEND NVIM_LINK_LIBRARIES netapi32)
   list(APPEND NVIM_LINK_LIBRARIES ${WINPTY_LIBRARIES})
 endif()
 
@@ -461,6 +471,7 @@ install_helper(TARGETS nvim)
 
 set_property(TARGET nvim APPEND PROPERTY
              INCLUDE_DIRECTORIES ${LUA_PREFERRED_INCLUDE_DIRS})
+set_property(TARGET nvim PROPERTY ENABLE_EXPORTS TRUE)
 
 if(ENABLE_LTO AND (POLICY CMP0069))
   include(CheckIPOSupported)
@@ -632,6 +643,8 @@ endfunction()
 set(NO_SINGLE_CHECK_HEADERS
   os/win_defs.h
   os/pty_process_win.h
+  os/pty_conpty_win.h
+  os/os_win_console.h
 )
 foreach(hfile ${NVIM_HEADERS})
   get_test_target(test-includes "${hfile}" relative_path texe)

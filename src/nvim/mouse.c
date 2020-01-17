@@ -350,7 +350,7 @@ retnomove:
     count |= CURSOR_MOVED;              // Cursor has moved
   }
 
-  if (mouse_char == '+') {
+  if (mouse_char == curwin->w_p_fcs_chars.foldclosed) {
     count |= MOUSE_FOLD_OPEN;
   } else if (mouse_char != ' ') {
     count |= MOUSE_FOLD_CLOSE;
@@ -479,7 +479,7 @@ win_T *mouse_find_win(int *gridp, int *rowp, int *colp)
 static win_T *mouse_find_grid_win(int *gridp, int *rowp, int *colp)
 {
   if (*gridp == msg_grid.handle) {
-    rowp += msg_grid_pos;
+    // rowp += msg_grid_pos;  // PVS: dead store #11612
     *gridp = DEFAULT_GRID_HANDLE;
   } else if (*gridp > 1) {
     win_T *wp = get_win_by_grid_handle(*gridp);
@@ -508,31 +508,30 @@ static win_T *mouse_find_grid_win(int *gridp, int *rowp, int *colp)
   return NULL;
 }
 
-/*
- * setmouse() - switch mouse on/off depending on current mode and 'mouse'
- */
+/// Set UI mouse depending on current mode and 'mouse'.
+///
+/// Emits mouse_on/mouse_off UI event (unless 'mouse' is empty).
 void setmouse(void)
 {
-  int checkfor;
-
   ui_cursor_shape();
 
-  /* be quick when mouse is off */
-  if (*p_mouse == NUL)
+  // Be quick when mouse is off.
+  if (*p_mouse == NUL) {
     return;
+  }
 
-  if (VIsual_active)
+  int checkfor = MOUSE_NORMAL;  // assume normal mode
+  if (VIsual_active) {
     checkfor = MOUSE_VISUAL;
-  else if (State == HITRETURN || State == ASKMORE || State == SETWSIZE)
+  } else if (State == HITRETURN || State == ASKMORE || State == SETWSIZE) {
     checkfor = MOUSE_RETURN;
-  else if (State & INSERT)
+  } else if (State & INSERT) {
     checkfor = MOUSE_INSERT;
-  else if (State & CMDLINE)
+  } else if (State & CMDLINE) {
     checkfor = MOUSE_COMMAND;
-  else if (State == CONFIRM || State == EXTERNCMD)
-    checkfor = ' ';     /* don't use mouse for ":confirm" or ":!cmd" */
-  else
-    checkfor = MOUSE_NORMAL;        /* assume normal mode */
+  } else if (State == CONFIRM || State == EXTERNCMD) {
+    checkfor = ' ';  // don't use mouse for ":confirm" or ":!cmd"
+  }
 
   if (mouse_has(checkfor)) {
     ui_call_mouse_on();

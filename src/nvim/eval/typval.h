@@ -246,7 +246,7 @@ typedef int scid_T;
 /// Format argument for scid_T
 #define PRIdSCID "d"
 
-// SCript ConteXt (SCTX): identifies a script script line.
+// SCript ConteXt (SCTX): identifies a script line.
 // When sourcing a script "sc_lnum" is zero, "sourcing_lnum" is the current
 // line number. When executing a user function "sc_lnum" is the line where the
 // function was defined, "sourcing_lnum" is the line number inside the
@@ -798,7 +798,7 @@ static inline bool tv_get_float_chk(const typval_T *const tv,
     *ret_f = (float_T)tv->vval.v_number;
     return true;
   }
-  emsgf(_("E808: Number or Float required"));
+  emsgf("%s", _("E808: Number or Float required"));
   return false;
 }
 

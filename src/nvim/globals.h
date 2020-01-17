@@ -126,6 +126,13 @@ typedef off_t off_T;
  */
 EXTERN int mod_mask INIT(= 0x0);                /* current key modifiers */
 
+
+// TODO(bfredl): for the final interface this should find a more suitable
+// location.
+EXTERN sattr_T *lua_attr_buf INIT(= NULL);
+EXTERN size_t lua_attr_bufsize INIT(= 0);
+EXTERN bool lua_attr_active INIT(= false);
+
 /*
  * Cmdline_row is the row where the command line starts, just below the
  * last window.
@@ -318,7 +325,7 @@ EXTERN except_T *caught_stack INIT(= NULL);
 /// we do garbage collection before waiting for a char at the toplevel.
 /// "garbage_collect_at_exit" indicates garbagecollect(1) was called.
 ///
-EXTERN int may_garbage_collect INIT(= false);
+EXTERN bool may_garbage_collect INIT(= false);
 EXTERN int want_garbage_collect INIT(= false);
 EXTERN int garbage_collect_at_exit INIT(= false);
 
@@ -331,6 +338,7 @@ EXTERN int garbage_collect_at_exit INIT(= false);
 #define SID_NONE        -6      // don't set scriptID
 #define SID_LUA         -7      // for Lua scripts/chunks
 #define SID_API_CLIENT  -8      // for API clients
+#define SID_STR         -9      // for sourcing a string
 
 // Script CTX being sourced or was sourced to define the current function.
 EXTERN sctx_T current_sctx INIT(= { 0 COMMA 0 COMMA 0 });
@@ -400,11 +408,6 @@ EXTERN bool mouse_past_eol INIT(= false);       /* mouse right of line */
 EXTERN int mouse_dragging INIT(= 0);            /* extending Visual area with
                                                    mouse dragging */
 
-/* Value set from 'diffopt'. */
-EXTERN int diff_context INIT(= 6);              /* context for folds */
-EXTERN int diff_foldcolumn INIT(= 2);           /* 'foldcolumn' for diff mode */
-EXTERN int diff_need_scrollbind INIT(= FALSE);
-
 /* The root of the menu hierarchy. */
 EXTERN vimmenu_T        *root_menu INIT(= NULL);
 /*
@@ -456,6 +459,7 @@ EXTERN frame_T  *topframe;      /* top of the window frame tree */
  * one in the list, "curtab" is the current one.
  */
 EXTERN tabpage_T    *first_tabpage;
+EXTERN tabpage_T    *lastused_tabpage;
 EXTERN tabpage_T    *curtab;
 EXTERN int redraw_tabline INIT(= FALSE);           /* need to redraw tabline */
 
@@ -768,7 +772,6 @@ EXTERN int did_outofmem_msg INIT(= false);
 // set after out of memory msg
 EXTERN int did_swapwrite_msg INIT(= false);
 // set after swap write error msg
-EXTERN int undo_off INIT(= false);          // undo switched off for now
 EXTERN int global_busy INIT(= 0);           // set when :global is executing
 EXTERN int listcmd_busy INIT(= false);      // set when :argdo, :windo or
                                             // :bufdo is executing
@@ -787,7 +790,11 @@ EXTERN int postponed_split_flags INIT(= 0);       /* args for win_split() */
 EXTERN int postponed_split_tab INIT(= 0);       /* cmdmod.tab */
 EXTERN int g_do_tagpreview INIT(= 0);       /* for tag preview commands:
                                                height of preview window */
-EXTERN int replace_offset INIT(= 0);        /* offset for replace_push() */
+EXTERN int g_tag_at_cursor INIT(= false);  // whether the tag command comes
+                                           // from the command line (0) or was
+                                           // invoked as a normal command (1)
+
+EXTERN int replace_offset INIT(= 0);        // offset for replace_push()
 
 EXTERN char_u   *escape_chars INIT(= (char_u *)" \t\\\"|");
 /* need backslash in cmd line */
@@ -1052,6 +1059,8 @@ EXTERN char_u e_floatexchange[] INIT(=N_(
 
 EXTERN char top_bot_msg[] INIT(= N_("search hit TOP, continuing at BOTTOM"));
 EXTERN char bot_top_msg[] INIT(= N_("search hit BOTTOM, continuing at TOP"));
+
+EXTERN char line_msg[] INIT(= N_(" line "));
 
 // For undo we need to know the lowest time possible.
 EXTERN time_t starttime;
